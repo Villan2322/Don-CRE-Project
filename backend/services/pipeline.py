@@ -842,51 +842,73 @@ NOTE: No Property Appraiser SF was provided as baseline.
 Compare SF across available documents only.
 """
         
-        prompt = f"""Analyze this CRE deal package and produce a comprehensive report.
+        prompt = f"""Analyze this CRE deal package and produce a comprehensive JSON report.
 
 CRITICAL FOCUS: Identify RSF (rentable square footage) discrepancies between sources.
-Don needs to find properties that may be underpaying based on incorrect SF.
 {pa_context}
 
 Deal Package:
 {json.dumps(summary, indent=2, default=str)}
 
-Produce analysis with these sections:
+YOU MUST return ONLY valid JSON with EXACTLY these top-level keys (no others, no renaming):
 
-1. RSF_RECONCILIATION
-   - property_appraiser_sf: {pa_sf if pa_sf else 'Not provided'}
-   - Compare rent roll total SF against Property Appraiser SF (if provided)
-   - Also compare SF from: leases, BOMA measurement, county PA records
-   - Calculate discrepancy_sf = (Property Appraiser SF - Rent Roll Total SF)
-   - Calculate discrepancy_pct
-   - Identify which tenants have SF mismatches
+{{
+  "rsf_reconciliation": {{
+    "property_appraiser_sf": {pa_sf if pa_sf else 0},
+    "rent_roll_total_sf": <number>,
+    "discrepancy_sf": <number: PA_sf minus rent_roll_sf>,
+    "discrepancy_pct": <number>,
+    "alert_triggered": <true if discrepancy > 2%>
+  }},
+  "rsf_recovery_opportunity": {{
+    "recoverable_sf": <number>,
+    "average_rent_psf": <number>,
+    "estimated_annual_recovery": <number: recoverable_sf * avg_rent_psf>
+  }},
+  "tenant_analysis": [
+    {{
+      "tenant": "<name>",
+      "suite": "<suite/unit>",
+      "rsf": <number>,
+      "annual_rent": <number>,
+      "monthly_rent": <number>,
+      "lease_start": "<YYYY-MM-DD or empty>",
+      "lease_end": "<YYYY-MM-DD or empty>",
+      "months_remaining": <number or null>,
+      "risk_level": "<LOW|MEDIUM|HIGH>"
+    }}
+  ],
+  "red_flags": [
+    {{
+      "severity": "<CRITICAL|HIGH|MODERATE|LOW>",
+      "category": "<category>",
+      "flag": "<short identifier>",
+      "description": "<what the problem is>",
+      "impact": "<financial or operational impact>",
+      "resolution": "<recommended action>"
+    }}
+  ],
+  "deal_score": {{
+    "overall_score": <0-100>,
+    "tier": "<GREEN|YELLOW|ORANGE|RED>",
+    "data_completeness": <0-100>,
+    "rsf_accuracy": <0-100>,
+    "lease_health": <0-100>
+  }},
+  "what_to_get_next": ["<document name>", "<document name>"],
+  "financial_summary": {{
+    "total_annual_rent": <number>,
+    "average_rent_psf": <number>,
+    "walt_years": <number or null>
+  }}
+}}
 
-2. RSF_RECOVERY_OPPORTUNITY
-   - If PA SF > Rent Roll SF, there's lost revenue
-   - Calculate: sf = discrepancy_sf, annual_value = discrepancy_sf * average_rent_psf
-   - Flag tenants who may be underpaying
-
-3. TENANT_ANALYSIS
-   - List all tenants with their SF from each source
-   - Flag any with >2% variance across sources
-   - Include lease expiry and risk level
-
-4. RED_FLAGS
-   - List issues by severity: CRITICAL, HIGH, MODERATE, LOW
-   - Include: SF discrepancies, lease expirations, missing docs, calculation errors
-
-5. DEAL_SCORE
-   - Score 0-100 based on data quality and risk
-   - Sub-scores for: data_completeness, rsf_accuracy, lease_health, financial_clarity
-
-6. WHAT_TO_GET_NEXT
-   - Prioritized list of missing documents that would improve analysis
-   - Focus on docs that would resolve SF discrepancies
-
-7. FINANCIAL_SUMMARY
-   - NOI, total rent, vacancy, WALT if calculable from available docs
-
-Return as JSON with these exact top-level keys."""
+RULES:
+- Do NOT add any keys not listed above
+- Do NOT rename keys (e.g. do not use "rent_verification" instead of "tenant_analysis")
+- tenant_analysis MUST be an array of tenant objects as shown above
+- All numbers must be plain numbers, not strings
+- Return ONLY the JSON object, no markdown fences"""
 
         response = await self.client.chat.completions.create(
             model=self.model,
@@ -907,11 +929,11 @@ Return as JSON with these exact top-level keys."""
         """
         Build the final report that Don can use.
         """
-        # Extract key metrics
-        rsf_recon = synthesis.get("RSF_RECONCILIATION", synthesis.get("rsf_reconciliation", {}))
-        recovery = synthesis.get("RSF_RECOVERY_OPPORTUNITY", synthesis.get("rsf_recovery_opportunity", {}))
-        red_flags = synthesis.get("RED_FLAGS", synthesis.get("red_flags", []))
-        score_data = synthesis.get("DEAL_SCORE", synthesis.get("deal_score", {}))
+        # Extract key metrics — new prompt uses lowercase, keep UPPERCASE fallback
+        rsf_recon  = synthesis.get("rsf_reconciliation")  or synthesis.get("RSF_RECONCILIATION")  or {}
+        recovery   = synthesis.get("rsf_recovery_opportunity") or synthesis.get("RSF_RECOVERY_OPPORTUNITY") or {}
+        red_flags  = synthesis.get("red_flags")  or synthesis.get("RED_FLAGS")  or []
+        score_data = synthesis.get("deal_score") or synthesis.get("DEAL_SCORE") or {}
         
         # Normalize red flags to list
         if isinstance(red_flags, dict):
@@ -1057,29 +1079,22 @@ Return as JSON with these exact top-level keys."""
         The AI sometimes puts tenants in TENANT_ANALYSIS, rent_verification.tenants,
         lease_audit.tenants, or similar nested locations.
         """
-        print(f"[PIPELINE] _extract_tenants synthesis keys: {list(synthesis.keys())}", flush=True)
-        rv_debug = synthesis.get("rent_verification") or {}
-        print(f"[PIPELINE] rent_verification keys: {list(rv_debug.keys()) if isinstance(rv_debug, dict) else type(rv_debug)}", flush=True)
-        print(f"[PIPELINE] rent_verification snippet: {str(rv_debug)[:400]}", flush=True)
-        # Try direct tenant keys
-        for key in ["TENANT_ANALYSIS", "tenant_analysis", "tenants", "TENANTS", "tenant_roster"]:
+        # Primary key - what the new prompt enforces
+        for key in ["tenant_analysis", "TENANT_ANALYSIS", "tenants", "TENANTS", "tenant_roster"]:
             val = synthesis.get(key)
             if val:
                 result = self._normalize_to_list(val)
                 if result:
                     return result
 
-        # Try nested inside rent_verification
+        # Fallback: rent_verification.tenant_shares (old AI schema)
         rv = synthesis.get("rent_verification") or synthesis.get("RENT_VERIFICATION") or {}
         if isinstance(rv, dict):
-            for key in ["tenants", "tenant_list", "rent_roll", "tenant_analysis"]:
-                val = rv.get(key)
-                if val:
-                    result = self._normalize_to_list(val)
-                    if result:
-                        return result
+            shares = rv.get("tenant_shares") or rv.get("tenants") or rv.get("tenant_list") or []
+            if shares:
+                return self._normalize_to_list(shares)
 
-        # Try nested inside lease_audit
+        # Fallback: lease_audit
         la = synthesis.get("lease_audit") or synthesis.get("LEASE_AUDIT") or {}
         if isinstance(la, dict):
             for key in ["tenants", "abstracts", "leases"]:
