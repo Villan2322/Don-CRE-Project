@@ -13,6 +13,11 @@ from models.schemas import (
     AnalysisResult,
 )
 from services.document_processor import processor
+from services.pipeline import CREPipeline
+from config.extraction_prompts import DOC_TYPES
+
+# Initialize the collapsed 15-node pipeline
+pipeline = CREPipeline()
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",
@@ -148,46 +153,118 @@ async def delete_document(document_id: str) -> dict:
     return {"message": "Document deleted", "document_id": document_id}
 
 
+@app.post("/pipeline/run")
+async def run_pipeline(deal_name: str, documents: list[dict]) -> dict:
+    """
+    Run the full 6-stage collapsed pipeline on a document package.
+    
+    This is the main entry point that replaces the 76-node n8n workflow.
+    
+    Args:
+        deal_name: Name of the deal being analyzed
+        documents: List of {filename, content, file_type} dicts
+        
+    Returns:
+        Complete DealAnalysis with scores, flags, and recommendations
+    """
+    try:
+        result = await pipeline.run(deal_name, documents)
+        return {
+            "success": True,
+            "deal_name": deal_name,
+            "analysis": result.model_dump() if hasattr(result, 'model_dump') else result.__dict__,
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "deal_name": deal_name,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+
+@app.get("/pipeline/doc-types")
+async def list_doc_types() -> dict:
+    """List all supported document types for the pipeline."""
+    return {
+        "doc_types": DOC_TYPES,
+        "descriptions": {
+            "LEASE": "Full executed lease agreement",
+            "LEASE_ABSTRACT": "Summary of lease terms",
+            "RENT_ROLL": "Tenant roster with rents (PDF)",
+            "RENT_ROLL_XLSX": "Tenant roster from spreadsheet",
+            "BOMA": "BOMA measurement certificate",
+            "FINANCIAL_MODEL": "Underwriting model with projections",
+            "CAM_RECONCILIATION": "CAM expense reconciliation",
+            "MANAGEMENT_REPORT": "Property management report",
+            "COUNTY_PA": "County property appraiser record",
+        }
+    }
+
+
 @app.get("/agents")
 async def list_agents() -> dict:
-    """List available AI agents and their capabilities."""
+    """
+    List the collapsed pipeline stages (replaces 76 n8n nodes with 15).
+    
+    Based on the CRE Document Intelligence v2 technical reference.
+    """
     return {
-        "agents": [
+        "pipeline_architecture": "Collapsed 15-node design",
+        "original_nodes": 76,
+        "collapsed_nodes": 15,
+        "stages": [
             {
-                "name": "DocumentClassifierAgent",
-                "description": "Classifies documents by type (lease, rent roll, BOMA, etc.)",
-                "input": "Document text or file",
-                "output": "Document type, confidence, metadata"
+                "stage": 1,
+                "name": "File Extraction",
+                "node": "Universal File Ingestion",
+                "description": "Detects file type, handles OCR, loops over all files dynamically",
+                "replaces": "Extract Pages from PDF, Extract_Rent_Roll, Extract_Lease×8, Extract_BOMA, Handle Image Upload"
             },
             {
-                "name": "LeaseAbstractionAgent",
-                "description": "Extracts 40+ structured fields from lease documents",
-                "input": "Lease document text",
-                "output": "Structured lease abstract with all key terms"
+                "stage": 2,
+                "name": "Classification",
+                "node": "Classify Documents",
+                "description": "Single node classifies all documents into 9 types",
+                "replaces": "Build Classification Payload, Claude - Classify Doc, Parse Classification, Route by Doc Type"
             },
             {
-                "name": "RentRollAgent",
-                "description": "Parses and normalizes rent roll data",
-                "input": "Rent roll (Excel/PDF)",
-                "output": "Normalized tenant list, summary metrics, issues"
+                "stage": 3,
+                "name": "Extraction",
+                "node": "Extract Documents (config-driven)",
+                "description": "ONE node with config map handles all 9 doc types",
+                "replaces": "27 extraction lane nodes (Build Payload ×9, Claude Call ×9, Parse ×9)"
             },
             {
-                "name": "RSFReconciliationAgent",
-                "description": "Reconciles square footage across sources",
-                "input": "Rent roll, leases, BOMA measurement",
-                "output": "Variance analysis, revenue impact"
+                "stage": 4,
+                "name": "Synthesis",
+                "node": "Synthesize Deal",
+                "description": "Cross-document analysis, RSF reconciliation, scoring",
+                "replaces": "Build Synthesis Payload, Claude - Synthesize Deal, Parse Synthesis"
             },
             {
-                "name": "RedFlagDetectionAgent",
-                "description": "Identifies deal risks and issues",
-                "input": "All analysis data",
-                "output": "Categorized red flags with severity and actions"
+                "stage": 5,
+                "name": "Verification",
+                "node": "Verify Analysis",
+                "description": "Arithmetic checks, confidence thresholds",
+                "replaces": "Arithmetic Verification, Flatten Fields, Independent Verification, Apply Confidence"
             },
             {
-                "name": "RiskScoringAgent",
-                "description": "Generates comprehensive deal score (0-100)",
-                "input": "Complete deal analysis",
-                "output": "Deal score, tier, sub-scores, recommendations"
+                "stage": 6,
+                "name": "Output",
+                "node": "Format Output",
+                "description": "Structures data for all 6 sheet tabs",
+                "replaces": "Build Deal Snapshot Rows, Build Audit Log Rows, Build Rent Rows, Build Lease Audit Rows, Build Risk Dashboard"
             }
+        ],
+        "doc_types_supported": DOC_TYPES,
+        "key_outputs": [
+            "Deal Score (0-100) with tier classification",
+            "RSF Reconciliation across all sources",
+            "Red Flags by severity (CRITICAL, HIGH, MEDIUM, LOW)",
+            "WALT calculation and lease expiry schedule",
+            "What To Get Next prioritized list",
+            "RSF Recovery Opportunity with dollar estimate"
         ]
     }

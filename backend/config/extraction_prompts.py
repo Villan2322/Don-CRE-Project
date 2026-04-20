@@ -292,6 +292,18 @@ Return ONLY valid JSON matching the schema.""",
 }
 
 
+# Alias for pipeline imports
+EXTRACTION_PROMPTS = {
+    doc_type: {
+        "system": config["system_prompt"],
+        "fields": config["fields"],
+    }
+    for doc_type, config in EXTRACTION_CONFIGS.items()
+}
+
+# Document types list
+DOC_TYPES = list(EXTRACTION_CONFIGS.keys())
+
 # Classification prompt - used to determine doc_type
 CLASSIFICATION_PROMPT = """You are a commercial real estate document classifier.
 Analyze the document content and classify it into ONE of these categories:

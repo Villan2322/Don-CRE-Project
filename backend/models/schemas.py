@@ -154,3 +154,75 @@ class AnalysisResponse(BaseModel):
     status: ProcessingStatus
     message: str
     result: Optional[AnalysisResult] = None
+
+
+# Pipeline-specific models (used by the collapsed 15-node pipeline)
+
+class TenantInfo(BaseModel):
+    """Simplified tenant info for pipeline output."""
+    name: str
+    suite: Optional[str] = None
+    rsf: Optional[float] = None
+    lease_start: Optional[str] = None
+    lease_end: Optional[str] = None
+    monthly_rent: Optional[float] = None
+    annual_rent: Optional[float] = None
+    rent_psf: Optional[float] = None
+
+
+class LeaseAbstractPipeline(BaseModel):
+    """Lease abstract for pipeline output."""
+    tenant_name: Optional[str] = None
+    premises_address: Optional[str] = None
+    suite: Optional[str] = None
+    rentable_sf: Optional[float] = None
+    lease_commencement: Optional[str] = None
+    lease_expiration: Optional[str] = None
+    lease_term_months: Optional[int] = None
+    annual_base_rent: Optional[float] = None
+    monthly_rent: Optional[float] = None
+    rent_escalation: Optional[str] = None
+    expense_structure: Optional[str] = None
+    cam_cap: Optional[float] = None
+    renewal_options: Optional[str] = None
+    early_termination: Optional[str] = None
+    tenant_improvements: Optional[float] = None
+    missing_fields: list[str] = []
+    months_remaining: Optional[int] = None
+    risk_level: Optional[str] = None
+
+
+# Alias for backwards compatibility
+LeaseAbstract = LeaseAbstractPipeline
+
+
+class RSFReconciliationPipeline(BaseModel):
+    """RSF reconciliation for pipeline output."""
+    rent_roll_rsf: Optional[float] = None
+    lease_rsf: Optional[float] = None
+    boma_rsf: Optional[float] = None
+    county_pa_rsf: Optional[float] = None
+    discrepancy_sf: Optional[float] = None
+    discrepancy_pct: Optional[float] = None
+
+
+class DealAnalysis(BaseModel):
+    """Complete deal analysis output from the pipeline."""
+    deal_name: str
+    overall_score: float = 0
+    tier: str = "UNKNOWN"
+    sub_scores: dict = {}
+    red_flags: list[RedFlag] = []
+    rsf_reconciliation: Optional[RSFReconciliationPipeline] = None
+    rsf_recovery_sf: float = 0
+    rsf_recovery_annual_value: float = 0
+    tenants: list[TenantInfo] = []
+    lease_abstracts: list[LeaseAbstractPipeline] = []
+    noi: Optional[float] = None
+    walt_months: Optional[float] = None
+    vacancy_pct: Optional[float] = None
+    ar_outstanding: Optional[float] = None
+    what_to_get_next: list[str] = []
+    arithmetic_checks: list[dict] = []
+    analysis_timestamp: str = ""
+    documents_processed: int = 0
