@@ -93,10 +93,30 @@ interface AnalysisAPIResponse {
     action?: string
   }>
   what_to_get_next?: Array<string | { document?: string; why_needed?: string; priority?: number }>
+  lease_abstracts?: Array<{
+    id?: string
+    tenant_name?: string
+    tenant?: string
+    suite?: string
+    rentable_sf?: number
+    rsf?: number
+    lease_commencement?: string
+    commencement?: string
+    lease_expiration?: string | null
+    expiration?: string | null
+    annual_base_rent?: number
+    base_rent_annual?: number
+    escalation?: string
+    escalations?: string
+    expense_structure?: string
+    missing_fields?: string[]
+  }>
   financial?: {
     noi?: number
     vacancy?: number
     walt?: number
+    total_annual_rent?: number
+    average_rent_psf?: number
   }
   documents?: {
     total: number
@@ -228,25 +248,25 @@ export default function DashboardPage() {
       tier: (tierValue.toUpperCase() || 'YELLOW') as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
       subScores: {
         dataCompleteness: result.risk?.sub_scores?.data_completeness ?? 70,
-        rsfAlignment: rsfRecoverySf > 0 ? 50 : 90,
+        rsfAlignment: result.risk?.sub_scores?.rsf_accuracy ?? (rsfRecoverySf > 0 ? 50 : 90),
         financialIntegrity: result.risk?.sub_scores?.financial_integrity ?? scoreValue,
-        leaseLeverage: result.risk?.sub_scores?.lease_leverage ?? scoreValue,
+        leaseLeverage: result.risk?.sub_scores?.lease_health ?? result.risk?.sub_scores?.lease_leverage ?? scoreValue,
         riskProfile: result.risk?.sub_scores?.risk_profile ?? scoreValue,
         documentCoverage: Math.min(100, (result.documents_processed || result.documents?.total || 0) * 20),
       },
       rsfReconciliation: {
         bomaTotalSF: propertyAppraiserSf || result.rsf_analysis?.reconciliation?.boma_rsf || 0,
-        rentRollOccupiedSF: result.rsf_analysis?.reconciliation?.rent_roll_rsf || result.rsf_analysis?.reconciliation?.rent_roll_total_sf || 0,
+        rentRollOccupiedSF: result.rsf_analysis?.reconciliation?.rent_roll_total_sf || result.rsf_analysis?.reconciliation?.rent_roll_rsf || 0,
         deltaSF: rsfRecoverySf || result.rsf_analysis?.reconciliation?.discrepancy_sf || 0,
         deltaPercent: result.rsf_analysis?.reconciliation?.discrepancy_pct || 0,
         estimatedAnnualRecovery: rsfRecoveryValue,
         alertTriggered: rsfRecoverySf > 0 || (result.rsf_analysis?.discrepancy_found ?? false),
       },
       financialSummary: {
-        totalAnnualRent: tenants.reduce((sum, t) => sum + t.annualRent, 0),
+        totalAnnualRent: result.financial?.total_annual_rent ?? tenants.reduce((sum, t) => sum + t.annualRent, 0),
         noi: result.financial?.noi ?? 0,
         capRate: 0,
-        averageRentPSF: 0,
+        averageRentPSF: result.financial?.average_rent_psf ?? 0,
         vacancy: result.financial?.vacancy ?? 0,
         arDelinquency: 0,
       },

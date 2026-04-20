@@ -31,7 +31,7 @@ export interface DealAnalysis {
   }
   walt: number
   redFlags: RedFlag[]
-  whatToGetNext: (string | { document?: string; why_needed?: string; score_impact?: string | number; priority?: string | number })[]
+  whatToGetNext: string[]
   tenants: Tenant[]
   leaseAbstracts: LeaseAbstract[]
   documents: UploadedDocument[]
