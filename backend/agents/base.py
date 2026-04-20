@@ -14,7 +14,7 @@ class BaseAgent:
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        self.model = "anthropic/claude-3.5-sonnet"
+        self.model = "anthropic/claude-sonnet-4"
     
     async def analyze(self, content: str, context: Optional[dict] = None) -> dict:
         """Run analysis on the provided content."""
