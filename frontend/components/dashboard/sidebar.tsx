@@ -16,6 +16,7 @@ import { TabId } from '@/lib/types'
 interface SidebarProps {
   activeTab: TabId
   onTabChange: (tab: TabId) => void
+  hasRealData?: boolean
 }
 
 const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
@@ -27,7 +28,7 @@ const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'abstracts', label: 'Lease Abstracts', icon: FileStack },
 ]
 
-export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export function Sidebar({ activeTab, onTabChange, hasRealData }: SidebarProps) {
   return (
     <aside className="flex w-56 flex-col border-r border-border bg-sidebar">
       <nav className="flex-1 p-3">
@@ -83,9 +84,19 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       </nav>
       <div className="border-t border-sidebar-border p-4">
         <div className="text-xs text-muted-foreground">
-          Last updated
-          <br />
-          <span className="text-sidebar-foreground">April 18, 2026 2:32 PM</span>
+          {hasRealData ? (
+            <>
+              Analysis complete
+              <br />
+              <span className="text-sidebar-foreground">Just now</span>
+            </>
+          ) : (
+            <>
+              Showing demo data
+              <br />
+              <span className="text-sidebar-foreground">Upload docs to analyze</span>
+            </>
+          )}
         </div>
       </div>
     </aside>

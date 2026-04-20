@@ -1,4 +1,4 @@
-from .base import BaseAgent
+from agents.base import BaseAgent
 
 
 RED_FLAG_DETECTION_PROMPT = """You are an expert commercial real estate due diligence agent specializing in red flag detection.

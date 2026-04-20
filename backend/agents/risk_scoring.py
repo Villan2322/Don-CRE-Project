@@ -1,4 +1,4 @@
-from .base import BaseAgent
+from agents.base import BaseAgent
 
 
 RISK_SCORING_PROMPT = """You are an expert commercial real estate deal risk scoring agent.

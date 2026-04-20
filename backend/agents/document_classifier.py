@@ -1,4 +1,4 @@
-from .base import BaseAgent
+from agents.base import BaseAgent
 
 
 DOCUMENT_CLASSIFIER_PROMPT = """You are an expert commercial real estate document classification agent.
