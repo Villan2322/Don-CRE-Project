@@ -263,47 +263,152 @@ class CREPipeline:
     async def _try_extract_pdf(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
         """Try multiple methods to extract text from PDF."""
         
-        # Method 1: PyPDF2 text extraction
+        # Method 1: PyPDF2 text extraction (fast, works for text-based PDFs)
         text = self._extract_pdf_text(content)
         
         # Check for extraction errors
         if text and "[PDF extraction error" in text:
             doc["extraction_errors"].append(text)
-            # Even if there's an error message, we'll include it so the AI knows what happened
-            doc["extraction_method"] = "pdf_error"
-            return text, True  # Return True so the document is included with the error info
         
-        # Check if we got meaningful text
-        if text and len(text.strip()) > 100:
+        # Check if we got meaningful text (>100 chars of actual content)
+        if text and len(text.strip()) > 100 and "[PDF extraction error" not in text:
             doc["extraction_method"] = "pdf_text"
             if self.tracer:
                 self.tracer.log("INGEST", f"  -> PDF text: {len(text):,} chars extracted", "success")
             return text, True
         
-        # Sparse text - the PDF might be scanned or have minimal content
+        # Sparse or no text - try OpenRouter's native PDF parsing with OCR
         sparse_chars = len(text.strip()) if text else 0
         if self.tracer:
-            self.tracer.log("INGEST", f"  -> PDF has sparse text ({sparse_chars} chars). This may be a scanned document.", "warning")
+            self.tracer.log("INGEST", f"  -> PDF has sparse text ({sparse_chars} chars). Trying AI-powered PDF parsing...", "info")
         
-        # For scanned PDFs, we can't do true OCR without a specialized service
-        # But we should still include the document with helpful info
-        helpful_message = f"""[PDF ANALYSIS for {filename}]
+        # Method 2: Use OpenRouter's native PDF parsing (supports scanned documents)
+        ocr_text = await self._parse_pdf_with_openrouter(content, filename)
+        
+        if ocr_text and "[PDF parsing error" not in ocr_text and len(ocr_text.strip()) > 50:
+            doc["extraction_method"] = "pdf_ai_ocr"
+            if self.tracer:
+                self.tracer.log("INGEST", f"  -> AI PDF parsing: {len(ocr_text):,} chars extracted", "success")
+            return ocr_text, True
+        
+        if ocr_text and "[PDF parsing error" in ocr_text:
+            doc["extraction_errors"].append(ocr_text)
+        
+        # Method 3: Combine whatever we got
+        combined = ""
+        if text and len(text.strip()) > 20:
+            combined = text.strip()
+        if ocr_text and len(ocr_text.strip()) > 20 and "[PDF parsing error" not in ocr_text:
+            combined = (combined + "\n\n" + ocr_text.strip()) if combined else ocr_text.strip()
+        
+        if combined and len(combined.strip()) > 50:
+            doc["extraction_method"] = "pdf_combined"
+            return combined, True
+        
+        # All methods failed - provide helpful message
+        doc["extraction_method"] = "pdf_failed"
+        doc["extraction_errors"].append(f"Could not extract text from PDF - tried PyPDF2 and AI parsing")
+        error_msg = f"""[PDF EXTRACTION FAILED for {filename}]
 
-This PDF appears to be scanned or image-based with minimal extractable text ({sparse_chars} characters found).
+Unable to extract readable text from this PDF using multiple methods.
 
-What was found:
-{text.strip() if text else '(no text extracted)'}
+Errors encountered:
+{chr(10).join(doc['extraction_errors'])}
 
-RECOMMENDATION: For accurate RSF analysis, please provide one of:
+RECOMMENDATION: Please provide one of:
 1. A text-based PDF (where you can select/copy text)
-2. An Excel rent roll export
-3. The original document in a different format
+2. An Excel rent roll export  
+3. A clearer scan of the document
 
-Note: The Property Appraiser SF baseline of {getattr(self, '_property_appraiser_sf', 'N/A')} SF has been recorded and will be used for comparison once readable rent roll data is provided."""
-        
-        doc["extraction_method"] = "pdf_sparse"
-        doc["extraction_errors"].append(f"PDF has only {sparse_chars} chars of extractable text - likely scanned")
-        return helpful_message, True  # Return True so document is included with helpful info
+Property Appraiser SF baseline: {getattr(self, '_property_appraiser_sf', 'N/A')} SF"""
+        return error_msg, True
+    
+    async def _parse_pdf_with_openrouter(self, content: bytes | str, filename: str) -> str:
+        """
+        Parse PDF using OpenRouter's native PDF support.
+        This uses OpenRouter's file type with Mistral OCR for scanned documents.
+        Works for both text-based and scanned/image-based PDFs.
+        """
+        try:
+            import httpx
+            
+            if isinstance(content, bytes):
+                b64_content = base64.b64encode(content).decode("utf-8")
+            else:
+                b64_content = content
+            
+            # OpenRouter PDF format: type "file" with data URL
+            data_url = f"data:application/pdf;base64,{b64_content}"
+            
+            # Use httpx directly to include the plugins parameter
+            # (OpenAI client doesn't support the plugins field)
+            async with httpx.AsyncClient(timeout=120.0) as http_client:
+                response = await http_client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY', '')}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 8000,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": """Extract ALL text content from this PDF document. This is a commercial real estate document.
+
+CRITICAL: Extract everything you can see including:
+- All text, numbers, dates, names, addresses
+- Table data - preserve structure with | column | separators |
+- Headers, footers, page numbers
+- Any handwritten notes if visible
+
+If this is a RENT ROLL, extract for each tenant:
+- Tenant Name | Suite/Unit | Square Feet | Monthly Rent | Annual Rent | Lease Start | Lease End
+
+If this is a LEASE, extract:
+- Landlord, Tenant, Property Address, Premises/Suite, SF, Lease Term, Base Rent, Escalations
+
+Return ONLY the extracted text. No commentary or explanations."""
+                                    },
+                                    {
+                                        "type": "file",
+                                        "file": {
+                                            "filename": filename,
+                                            "file_data": data_url
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        # Use Mistral OCR for best scanned document support
+                        "plugins": [
+                            {
+                                "id": "file-parser",
+                                "pdf": {
+                                    "engine": "mistral-ocr"
+                                }
+                            }
+                        ]
+                    }
+                )
+                
+                if response.status_code != 200:
+                    error_text = response.text
+                    return f"[PDF parsing error: HTTP {response.status_code} - {error_text[:200]}]"
+                
+                result = response.json()
+                
+                if "choices" in result and len(result["choices"]) > 0:
+                    return result["choices"][0]["message"]["content"]
+                else:
+                    return f"[PDF parsing error: No content in response]"
+                    
+        except Exception as e:
+            return f"[PDF parsing error: {str(e)}]"
     
     async def _try_extract_excel(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
         """Try to extract text from Excel file."""
@@ -432,21 +537,19 @@ Note: The Property Appraiser SF baseline of {getattr(self, '_property_appraiser_
     
     async def _ocr_document(self, content: str | bytes, filename: str) -> str:
         """
-        OCR a scanned document or image.
-        For PDFs, we describe the situation and ask AI to help.
-        For images, we try vision API if available.
+        OCR images using OpenRouter's file format.
+        For PDFs, use _parse_pdf_with_openrouter instead.
         """
         ext = self._get_ext(filename)
         
-        # PDFs cannot be OCR'd directly through OpenRouter vision API
-        # Instead, we'll note this limitation and let the AI know
+        # PDFs should use the dedicated PDF parsing method
         if ext == "pdf":
-            # The PDF text extraction already failed if we're here
-            # We can't do true OCR without a specialized service
-            return f"[PDF OCR required: The PDF '{filename}' appears to be scanned/image-based. Text extraction found minimal content. Please ensure the PDF has selectable text, or provide a text-based version of this document.]"
+            return await self._parse_pdf_with_openrouter(content, filename)
         
-        # For actual images, try vision API
+        # For images, use OpenRouter's file format with vision
         try:
+            import httpx
+            
             if isinstance(content, bytes):
                 b64_content = base64.b64encode(content).decode("utf-8")
             else:
@@ -463,53 +566,64 @@ Note: The Property Appraiser SF baseline of {getattr(self, '_property_appraiser_
             }
             media_type = media_types.get(ext, "image/png")
             
-            # Check file size - OpenRouter has limits
+            # Check file size
             content_bytes = content if isinstance(content, bytes) else base64.b64decode(content)
-            if len(content_bytes) > 5 * 1024 * 1024:  # 5MB limit
-                return f"[OCR error: Image too large ({len(content_bytes) / 1024 / 1024:.1f}MB). Please provide a smaller image or text-based document.]"
+            if len(content_bytes) > 10 * 1024 * 1024:  # 10MB limit
+                return f"[OCR error: Image too large ({len(content_bytes) / 1024 / 1024:.1f}MB). Please provide a smaller image.]"
             
-            # Use OpenAI-compatible vision format
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=8000,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
+            data_url = f"data:{media_type};base64,{b64_content}"
+            
+            # Use OpenRouter with file type for images
+            async with httpx.AsyncClient(timeout=120.0) as http_client:
+                response = await http_client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY', '')}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 8000,
+                        "messages": [
                             {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{media_type};base64,{b64_content}",
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": """Extract ALL text from this document image. This is a commercial real estate document.
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": """Extract ALL text from this image. This is a commercial real estate document.
 
-CRITICAL INSTRUCTIONS:
-1. Extract EVERY piece of text you can see
-2. Preserve table structure using | separators for columns
-3. Include all numbers, dates, addresses, names
-4. If this is a rent roll, extract: Tenant Name, Suite, SF, Rent, Lease Dates
-5. If this is a lease, extract: Parties, Premises, Term, Rent, SF
-6. Return ONLY the extracted text, no commentary
+CRITICAL: Extract everything visible including:
+- All text, numbers, dates, names, addresses
+- Table data with | column | separators |
+- Headers, labels, annotations
 
-Begin extraction:"""
+If this is a RENT ROLL, extract: Tenant Name | Suite | SF | Rent | Lease Dates
+If this is a LEASE page, extract: All visible terms and conditions
+
+Return ONLY the extracted text."""
+                                    },
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": data_url
+                                        }
+                                    }
+                                ]
                             }
                         ]
                     }
-                ],
-            )
-            
-            return response.choices[0].message.content
+                )
+                
+                if response.status_code != 200:
+                    return f"[OCR error: HTTP {response.status_code} - {response.text[:200]}]"
+                
+                result = response.json()
+                if "choices" in result and len(result["choices"]) > 0:
+                    return result["choices"][0]["message"]["content"]
+                return "[OCR error: No content in response]"
+                
         except Exception as e:
-            error_msg = str(e)
-            # Provide helpful error message
-            if "400" in error_msg:
-                return f"[OCR error: Vision API request failed. The image format may not be supported. Please provide a text-based document instead.]"
-            if "vision" in error_msg.lower() or "image" in error_msg.lower():
-                return f"[OCR error: Model may not support vision. Please provide a text-based document.]"
-            return f"[OCR error: {error_msg}]"
+            return f"[OCR error: {str(e)}]"
     
     # =========================================================================
     # STAGE 2: Classification - What type of document is this?
