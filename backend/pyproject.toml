@@ -1,0 +1,14 @@
+[project]
+name = "cre-document-intelligence-backend"
+version = "0.1.0"
+description = "CRE Document Intelligence Platform - AI-powered document analysis backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.128.1",
+    "python-multipart>=0.0.9",
+    "openai>=1.40.0",
+    "pydantic>=2.0.0",
+    "PyPDF2>=3.0.0",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+]

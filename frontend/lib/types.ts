@@ -91,4 +91,4 @@ export interface UploadedDocument {
   status: 'PROCESSED' | 'PROCESSING' | 'FAILED'
 }
 
-export type TabId = 'snapshot' | 'audit' | 'rent-roll' | 'lease-audit' | 'risk' | 'abstracts'
+export type TabId = 'snapshot' | 'audit' | 'rent-roll' | 'lease-audit' | 'risk' | 'abstracts' | 'upload'

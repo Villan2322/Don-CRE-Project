@@ -10,6 +10,7 @@ import { ScoreHistoryChart, IncomeConcentrationChart, WALTTimelineChart } from '
 import { TenantTable } from './tenant-table'
 import { LeaseAbstractsTable } from './lease-abstracts-table'
 import { DocumentsList } from './documents-list'
+import { DocumentUpload } from './document-upload'
 
 interface TabContentProps {
   activeTab: TabId
@@ -30,6 +31,8 @@ export function TabContent({ activeTab, deal }: TabContentProps) {
       return <RiskTab deal={deal} />
     case 'abstracts':
       return <AbstractsTab deal={deal} />
+    case 'upload':
+      return <DocumentUpload />
     default:
       return <SnapshotTab deal={deal} />
   }

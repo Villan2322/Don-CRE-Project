@@ -60,7 +60,15 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         </div>
         <ul className="space-y-0.5">
           <li>
-            <button className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground">
+            <button
+              onClick={() => onTabChange('upload')}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                activeTab === 'upload'
+                  ? 'bg-sidebar-accent text-sidebar-foreground'
+                  : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+              )}
+            >
               <Upload className="h-4 w-4" />
               Upload Documents
             </button>
