@@ -28,6 +28,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PipelineTrace } from './pipeline-trace'
 
 interface UploadedFile {
   id: string
@@ -89,9 +90,11 @@ interface AnalysisResult {
 
 interface DocumentUploadProps {
   onAnalysisComplete?: (result: AnalysisResult) => void
+  traceLog?: Array<{ stage: string; message: string; level: string; timestamp: string }>
+  tenantCount?: number
 }
 
-export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
+export function DocumentUpload({ onAnalysisComplete, traceLog, tenantCount = 0 }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
@@ -721,6 +724,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Backend pipeline trace — shown after analysis completes */}
+      {traceLog && traceLog.length > 0 && (
+        <PipelineTrace
+          logs={traceLog as Array<{ stage: string; message: string; level: 'info' | 'success' | 'warning' | 'error'; timestamp: string }>}
+          tenantCount={tenantCount}
+        />
       )}
     </div>
   )

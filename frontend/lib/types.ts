@@ -35,6 +35,7 @@ export interface DealAnalysis {
   tenants: Tenant[]
   leaseAbstracts: LeaseAbstract[]
   documents: UploadedDocument[]
+  traceLog?: Array<{ stage: string; message: string; level: string; timestamp: string }>
 }
 
 export interface RedFlag {

@@ -515,25 +515,84 @@ class CREPipeline:
     # =========================================================================
 
     async def _extract_all(self, documents: list[dict]) -> list[dict]:
-        # For each document, always run a RENT_ROLL extraction pass in parallel with the typed pass.
-        # This guarantees tenant data is captured even when a multi-section PDF is misclassified.
-        typed_tasks   = [self._extract_one(doc, doc.get("doc_type", "UNKNOWN")) for doc in documents]
-        rr_tasks      = [self._extract_one(doc, "RENT_ROLL") for doc in documents]
+        """
+        Extract from every document. For large docs, chunk into overlapping windows
+        so rent roll tables in the middle pages are never missed by truncation.
+        Each chunk runs as a RENT_ROLL extraction. Results are merged by de-duplicating
+        tenants by name.
+        """
+        all_tasks = []
+        task_map = []  # (doc_index, chunk_label)
 
-        typed_results = await asyncio.gather(*typed_tasks, return_exceptions=True)
-        rr_results    = await asyncio.gather(*rr_tasks,    return_exceptions=True)
+        for i, doc in enumerate(documents):
+            doc_type = doc.get("doc_type", "UNKNOWN")
+            text = doc.get("text", "")
 
-        for doc, typed_res, rr_res in zip(documents, typed_results, rr_results):
-            typed = typed_res if not isinstance(typed_res, Exception) else {"error": str(typed_res)}
-            rr    = rr_res    if not isinstance(rr_res, Exception)    else {}
+            # Always run the typed extraction pass (chunk 0)
+            all_tasks.append(self._extract_one(doc, doc_type, text_override=None))
+            task_map.append((i, "typed"))
 
-            # Merge: typed result is primary; inject rent-roll tenants/summary if typed has none
-            merged = dict(typed)
-            if not merged.get("tenants") and rr.get("tenants"):
-                merged["tenants"] = rr["tenants"]
-                merged["_tenants_from_rr_pass"] = True
-            if not merged.get("summary") and rr.get("summary"):
-                merged["summary"] = rr["summary"]
+            # For large documents (>25k chars) also run chunked RENT_ROLL passes
+            # to catch tables that land in the middle of the document
+            CHUNK = 25000
+            OVERLAP = 3000
+            if len(text) > CHUNK:
+                start = 0
+                chunk_idx = 0
+                while start < len(text):
+                    end = min(start + CHUNK, len(text))
+                    chunk_text = text[start:end]
+                    all_tasks.append(self._extract_one(doc, "RENT_ROLL", text_override=chunk_text))
+                    task_map.append((i, f"chunk_{chunk_idx}"))
+                    chunk_idx += 1
+                    if end >= len(text):
+                        break
+                    start = end - OVERLAP  # overlap so table rows on chunk boundary aren't split
+
+            self.tracer.log("EXTRACT", f"{doc.get('filename')} ({doc_type}): {len(text):,} chars — {chunk_idx if len(text) > CHUNK else 0} extra chunk(s)", "info")
+
+        all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
+
+        # Group results back by document index
+        doc_results: dict[int, list] = {i: [] for i in range(len(documents))}
+        for (doc_idx, label), result in zip(task_map, all_results):
+            if not isinstance(result, Exception):
+                doc_results[doc_idx].append((label, result))
+
+        for i, doc in enumerate(documents):
+            results_for_doc = doc_results[i]
+            if not results_for_doc:
+                doc["extraction"] = {"error": "All extraction attempts failed"}
+                continue
+
+            # Primary = typed pass result
+            typed_result = next((r for label, r in results_for_doc if label == "typed"), {})
+            merged = dict(typed_result)
+
+            # Collect all tenants from all chunk passes
+            all_tenants = list(merged.get("tenants") or [])
+            for label, result in results_for_doc:
+                if label == "typed":
+                    continue
+                chunk_tenants = result.get("tenants") or []
+                for t in chunk_tenants:
+                    if t is None:
+                        continue
+                    # De-duplicate by tenant name
+                    name = str(t.get("tenant_name") or t.get("tenant") or "").strip().lower()
+                    existing_names = {
+                        str(et.get("tenant_name") or et.get("tenant") or "").strip().lower()
+                        for et in all_tenants
+                    }
+                    if name and name not in existing_names:
+                        all_tenants.append(t)
+
+                # Pull in financial summary from any chunk that found one
+                if not merged.get("summary") and result.get("summary"):
+                    merged["summary"] = result["summary"]
+
+            if all_tenants:
+                merged["tenants"] = all_tenants
 
             doc["extraction"] = merged
             if doc.get("doc_type") in ["LEASE", "LEASE_ABSTRACT"]:
@@ -541,38 +600,36 @@ class CREPipeline:
 
             self.tracer.log(
                 "EXTRACT",
-                f"{doc.get('filename')} ({doc.get('doc_type')}): "
-                f"{len(merged.get('tenants') or [])} tenants extracted"
-                + (" [from RR fallback pass]" if merged.get("_tenants_from_rr_pass") else ""),
-                "info"
+                f"{doc.get('filename')}: {len(all_tenants)} tenants merged from {len(results_for_doc)} extraction pass(es)",
+                "success" if all_tenants else "warning",
             )
 
         return documents
 
-    async def _extract_one(self, doc: dict, doc_type: str) -> dict:
+    async def _extract_one(self, doc: dict, doc_type: str, text_override: str | None = None) -> dict:
         """Extract structured data from one document using the given doc_type schema."""
         config = EXTRACTION_PROMPTS.get(doc_type) or EXTRACTION_PROMPTS.get("RENT_ROLL")
         if not config:
             return {"_note": f"No extraction config for {doc_type}"}
 
-        text = doc.get("text", "")
-        # Hard cap: 30k chars max per extraction call
-        if len(text) > 30000:
-            # Keep beginning and end — rent roll tables are usually at the start,
-            # management report summaries at the beginning, totals at the end
-            text = text[:20000] + "\n\n[...middle truncated...]\n\n" + text[-10000:]
+        text = text_override if text_override is not None else doc.get("text", "")
+
+        # If this is a single-pass (no override) and text is large, take full document
+        # but cap at 30k chars — for chunked passes text_override is already sized
+        if text_override is None and len(text) > 30000:
+            text = text[:30000]
 
         prompt = (
-            f"Extract all structured data from this document as if it were a {doc_type}.\n"
+            f"Extract all structured data from this CRE document. Treat it as a {doc_type}.\n"
             f"Fields needed: {', '.join(config.get('fields', []))}\n\n"
             f"Document text:\n{text}\n\n"
             "CRITICAL RULES:\n"
             "- Return ONLY valid JSON. No markdown fences.\n"
             "- For numeric values use bare numbers — no $, commas, or units.\n"
-            "- Return null for fields not found in the document.\n"
+            "- Return null for fields not found in this text.\n"
             "- Do NOT include source_text, confidence, or citation fields.\n"
             "- For tenants: extract EVERY tenant row found, even if data is partial.\n"
-            "- tenant_name and rsf are the minimum required fields per tenant."
+            "- Minimum required per tenant: tenant_name (or tenant) and rsf."
         )
 
         response = await self.client.chat.completions.create(

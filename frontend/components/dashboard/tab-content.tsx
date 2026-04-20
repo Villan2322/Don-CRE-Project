@@ -34,7 +34,7 @@ export function TabContent({ activeTab, deal, hasRealData = false, onAnalysisCom
     case 'abstracts':
       return <AbstractsTab deal={deal} />
     case 'upload':
-      return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
+      return <DocumentUpload onAnalysisComplete={onAnalysisComplete} traceLog={deal.traceLog} tenantCount={deal.tenants?.length ?? 0} />
     default:
       return <SnapshotTab deal={deal} hasRealData={hasRealData} />
   }

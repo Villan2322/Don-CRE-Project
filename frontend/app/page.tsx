@@ -276,12 +276,18 @@ export default function DashboardPage() {
       tenants,
       leaseAbstracts,
       documents,
+      traceLog: (result.trace_log || []).map(l => ({
+        stage: l.stage,
+        message: l.message,
+        level: l.level,
+        timestamp: l.timestamp || new Date().toISOString(),
+      })),
     }
 
     setAnalysisData(transformed)
     setHasRealData(true)
-    // Auto-switch to snapshot tab to show results
-    setActiveTab('snapshot')
+    // Auto-switch to upload tab so user sees the trace immediately
+    setActiveTab('upload')
   }, [])
 
   // Use real data if available, otherwise mock
