@@ -58,7 +58,7 @@ class CREPipeline:
     # MAIN ENTRY POINT - Just pass files, get analysis
     # =========================================================================
     
-    async def analyze(self, files: list[dict], deal_name: str = None) -> dict:
+    async def analyze(self, files: list[dict], deal_name: str = None, property_appraiser_sf: float = None) -> dict:
         """
         Main entry point - analyze any uploaded documents.
         
@@ -68,12 +68,16 @@ class CREPipeline:
                 - content: File content (text for PDFs, base64 for images/excel)
                 - content_type: MIME type (optional, will auto-detect)
             deal_name: Optional name for this analysis (auto-generated if not provided)
+            property_appraiser_sf: Official SF from County Property Appraiser - the baseline for RSF comparison
             
         Returns:
             Complete analysis report with RSF discrepancies and recommendations
         """
         if not deal_name:
             deal_name = f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Store PA SF for synthesis stage
+        self._property_appraiser_sf = property_appraiser_sf
         
         # Stage 1: Ingest and prepare all files
         documents = await self._ingest_files(files)
@@ -92,7 +96,7 @@ class CREPipeline:
         # Stage 3: Extract data from each document
         extracted = await self._extract_all(classified)
         
-        # Stage 4: Synthesize cross-document analysis
+        # Stage 4: Synthesize cross-document analysis (uses PA SF as baseline)
         synthesis = await self._synthesize(deal_name, extracted)
         
         # Stage 5: Build final report
@@ -439,19 +443,41 @@ For numeric values (SF, rent, etc), extract just the number without formatting."
                 "enriched": doc.get("enriched", {}),
             })
         
+        # Get Property Appraiser SF baseline (the TRUTH)
+        pa_sf = getattr(self, '_property_appraiser_sf', None)
+        
         # Build summary for synthesis
         summary = {
             "deal_name": deal_name,
+            "property_appraiser_sf": pa_sf,  # Official baseline from county records
             "document_types_present": list(by_type.keys()),
             "document_count": len(documents),
             "documents_by_type": {k: len(v) for k, v in by_type.items()},
             "extractions": by_type,
         }
         
+        # Build PA context for the prompt
+        pa_context = ""
+        if pa_sf:
+            pa_context = f"""
+*** CRITICAL: PROPERTY APPRAISER BASELINE ***
+The official Property Appraiser SF is {pa_sf:,.0f} SF. This is the AUTHORITATIVE TRUTH.
+- This is the actual building size according to county records
+- Compare ALL rent roll SF and lease SF against this official number
+- If rent roll total < PA SF, tenants may be underpaying
+- Recovery = (PA SF - Rent Roll Total SF) * average rent PSF
+"""
+        else:
+            pa_context = """
+NOTE: No Property Appraiser SF was provided as baseline. 
+Compare SF across available documents only.
+"""
+        
         prompt = f"""Analyze this CRE deal package and produce a comprehensive report.
 
 CRITICAL FOCUS: Identify RSF (rentable square footage) discrepancies between sources.
 Don needs to find properties that may be underpaying based on incorrect SF.
+{pa_context}
 
 Deal Package:
 {json.dumps(summary, indent=2, default=str)}
@@ -459,14 +485,16 @@ Deal Package:
 Produce analysis with these sections:
 
 1. RSF_RECONCILIATION
-   - Compare SF from: rent roll, leases, BOMA measurement, county PA records
-   - Calculate discrepancy_sf (difference between highest and lowest)
+   - property_appraiser_sf: {pa_sf if pa_sf else 'Not provided'}
+   - Compare rent roll total SF against Property Appraiser SF (if provided)
+   - Also compare SF from: leases, BOMA measurement, county PA records
+   - Calculate discrepancy_sf = (Property Appraiser SF - Rent Roll Total SF)
    - Calculate discrepancy_pct
    - Identify which tenants have SF mismatches
 
 2. RSF_RECOVERY_OPPORTUNITY
-   - If discrepancies exist, calculate potential annual revenue recovery
-   - Use formula: discrepancy_sf * average_rent_psf
+   - If PA SF > Rent Roll SF, there's lost revenue
+   - Calculate: sf = discrepancy_sf, annual_value = discrepancy_sf * average_rent_psf
    - Flag tenants who may be underpaying
 
 3. TENANT_ANALYSIS

@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Spinner } from '@/components/ui/spinner'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Upload,
   FileText,
@@ -22,6 +24,8 @@ import {
   Terminal,
   ChevronDown,
   ChevronUp,
+  Building2,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -88,6 +92,10 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [traceLogs, setTraceLogs] = useState<TraceLog[]>([])
   const [showTrace, setShowTrace] = useState(true)
   const traceEndRef = useRef<HTMLDivElement>(null)
+  
+  // Property Appraiser baseline SF
+  const [propertyAppraiserSF, setPropertyAppraiserSF] = useState<string>('')
+  const [dealName, setDealName] = useState<string>('')
 
   // Auto-scroll trace log
   useEffect(() => {
@@ -148,6 +156,20 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       for (const uploadedFile of files) {
         formData.append('files', uploadedFile.file)
         addTrace('UPLOAD', `Preparing: ${uploadedFile.file.name} (${(uploadedFile.file.size / 1024).toFixed(1)} KB)`, 'info')
+      }
+      
+      // Add Property Appraiser SF as baseline for comparison
+      if (propertyAppraiserSF) {
+        const paSF = parseFloat(propertyAppraiserSF.replace(/,/g, ''))
+        if (!isNaN(paSF)) {
+          formData.append('property_appraiser_sf', paSF.toString())
+          addTrace('BASELINE', `Property Appraiser SF: ${paSF.toLocaleString()} SF (official baseline)`, 'info')
+        }
+      }
+      
+      // Add deal name if provided
+      if (dealName) {
+        formData.append('deal_name', dealName)
       }
 
       addTrace('STAGE_1', 'Uploading files to server...', 'info')
@@ -363,6 +385,72 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                   </Button>
                 </div>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Property Appraiser Baseline Input */}
+      {files.length > 0 && !analysisResult && (
+        <Card className="border-blue-500/30 bg-blue-500/5">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-blue-400" />
+              <CardTitle className="text-base">Property Appraiser Baseline</CardTitle>
+            </div>
+            <CardDescription>
+              Enter the official SF from the County Property Appraiser to compare against document data
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="deal-name">Property / Deal Name</Label>
+                <Input
+                  id="deal-name"
+                  type="text"
+                  placeholder="e.g., 5041 Bayou Boulevard"
+                  value={dealName}
+                  onChange={(e) => setDealName(e.target.value)}
+                  className="bg-background"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pa-sf">
+                  Property Appraiser Total SF
+                  <span className="ml-1 text-xs text-muted-foreground">(Required)</span>
+                </Label>
+                <Input
+                  id="pa-sf"
+                  type="text"
+                  placeholder="e.g., 125,000"
+                  value={propertyAppraiserSF}
+                  onChange={(e) => {
+                    // Allow numbers and commas only
+                    const val = e.target.value.replace(/[^\d,]/g, '')
+                    setPropertyAppraiserSF(val)
+                  }}
+                  className="bg-background font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  This is the official building SF from county records - the baseline for comparison
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-md bg-muted/50 p-3 text-sm">
+              <AlertCircle className="h-4 w-4 text-blue-400 shrink-0" />
+              <span className="text-muted-foreground">
+                Look up your property at{' '}
+                <a 
+                  href="https://www.google.com/search?q=property+appraiser" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:underline inline-flex items-center gap-1"
+                >
+                  your county&apos;s Property Appraiser website
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </span>
             </div>
           </CardContent>
         </Card>

@@ -1,7 +1,7 @@
 import fastapi
 import fastapi.middleware.cors
-from fastapi import UploadFile, File, HTTPException
-from typing import Optional
+from fastapi import UploadFile, File, HTTPException, Form
+from typing import Optional, Annotated
 import uuid
 
 from models.schemas import (
@@ -158,7 +158,8 @@ async def delete_document(document_id: str) -> dict:
 @app.post("/analyze/files")
 async def analyze_files(
     files: list[UploadFile] = File(...),
-    deal_name: Optional[str] = None,
+    deal_name: Annotated[Optional[str], Form()] = None,
+    property_appraiser_sf: Annotated[Optional[str], Form()] = None,
     use_langgraph: bool = True
 ) -> dict:
     """
@@ -169,11 +170,13 @@ async def analyze_files(
     2. Auto-determines if OCR is needed
     3. Auto-classifies document type
     4. Extracts relevant data
-    5. Produces report with RSF discrepancies
+    5. Compares against Property Appraiser baseline SF
+    6. Produces report with RSF discrepancies and recovery opportunity
     
     Args:
         files: Documents to analyze
         deal_name: Optional name for this analysis
+        property_appraiser_sf: Official SF from County Property Appraiser (the baseline for comparison)
         use_langgraph: If True, uses LangGraph pipeline with full tracing (default)
     
     Returns analysis showing which properties may be underpaying on SF.
@@ -190,11 +193,19 @@ async def analyze_files(
                 "content_type": f.content_type,
             })
         
+        # Parse Property Appraiser SF baseline
+        pa_sf = None
+        if property_appraiser_sf:
+            try:
+                pa_sf = float(property_appraiser_sf.replace(',', ''))
+            except ValueError:
+                pass
+        
         # Run pipeline (LangGraph has tracing built-in)
         if use_langgraph:
-            result = await langgraph_pipeline.analyze(file_data, deal_name)
+            result = await langgraph_pipeline.analyze(file_data, deal_name, pa_sf)
         else:
-            result = await pipeline.analyze(file_data, deal_name)
+            result = await pipeline.analyze(file_data, deal_name, pa_sf)
         
         return result
         

@@ -45,6 +45,7 @@ class PipelineState(TypedDict):
     # Input
     deal_name: str
     raw_files: list[dict]
+    property_appraiser_sf: float | None  # Official baseline SF from county records
     
     # After ingestion
     documents: list[dict]
@@ -140,13 +141,14 @@ class CRELangGraphPipeline:
     # =========================================================================
     
     @traceable(name="CRE Pipeline - Full Analysis")
-    async def analyze(self, files: list[dict], deal_name: str = None) -> dict:
+    async def analyze(self, files: list[dict], deal_name: str = None, property_appraiser_sf: float = None) -> dict:
         """
         Run the full pipeline with tracing.
         
         Args:
             files: List of {filename, content, content_type}
             deal_name: Optional name for this analysis
+            property_appraiser_sf: Official SF from County Property Appraiser - the baseline for RSF comparison
             
         Returns:
             Complete analysis with trace log
@@ -159,12 +161,19 @@ class CRELangGraphPipeline:
         self.tracer.log("START", f"Beginning analysis: {deal_name}", "info", {
             "file_count": len(files),
             "filenames": [f.get("filename", "unknown") for f in files],
+            "property_appraiser_sf": property_appraiser_sf,
         })
+        
+        if property_appraiser_sf:
+            self.tracer.log("BASELINE", f"Property Appraiser SF: {property_appraiser_sf:,.0f} SF (official baseline)", "info")
+        else:
+            self.tracer.log("BASELINE", "No Property Appraiser SF provided - will compare across documents only", "warning")
         
         # Initial state
         initial_state: PipelineState = {
             "deal_name": deal_name,
             "raw_files": files,
+            "property_appraiser_sf": property_appraiser_sf,
             "documents": [],
             "classified_documents": [],
             "extracted_documents": [],
@@ -442,21 +451,45 @@ Return JSON with each field. Use null if not found."""
         
         self.tracer.log("SYNTHESIZE", f"  Document types: {list(by_type.keys())}", "info")
         
+        # Property Appraiser SF is the official baseline
+        pa_sf = state.get("property_appraiser_sf")
+        
         summary = {
             "deal_name": state["deal_name"],
+            "property_appraiser_sf": pa_sf,  # This is the TRUTH - official baseline
             "document_types": list(by_type.keys()),
             "document_count": len(state["extracted_documents"]),
             "extractions": by_type,
         }
         
+        pa_context = ""
+        if pa_sf:
+            pa_context = f"""
+CRITICAL: The official Property Appraiser SF is {pa_sf:,.0f} SF. This is the authoritative baseline.
+- Compare all rent roll SF and lease SF against this official number
+- Calculate: (Rent Roll Total SF) vs (Property Appraiser SF) = discrepancy
+- If tenants are paying on LESS SF than the PA shows, that's lost revenue
+- Recovery = (PA SF - Rent Roll SF) * average rent PSF"""
+        else:
+            pa_context = """
+NOTE: No Property Appraiser SF was provided. Compare SF across documents only."""
+        
         prompt = f"""Analyze this CRE deal package. Focus on RSF discrepancies.
+
+{pa_context}
 
 Deal Package:
 {json.dumps(summary, indent=2, default=str)}
 
 Return JSON with:
-1. RSF_RECONCILIATION - Compare SF across sources, calculate discrepancy
+1. RSF_RECONCILIATION - Compare SF across sources (Property Appraiser is the BASELINE TRUTH)
+   - property_appraiser_sf: the official baseline (if provided)
+   - rent_roll_total_sf: sum of tenant SF from rent roll
+   - discrepancy_sf: (Property Appraiser SF - Rent Roll SF)
+   - discrepancy_pct: percentage difference
 2. RSF_RECOVERY_OPPORTUNITY - Potential annual revenue from SF corrections
+   - sf: square feet potentially recoverable
+   - annual_value: estimated annual revenue recovery
 3. TENANT_ANALYSIS - List tenants with SF from each source
 4. RED_FLAGS - Issues by severity (CRITICAL, HIGH, MODERATE, LOW)
 5. DEAL_SCORE - Score 0-100 with sub-scores
@@ -512,6 +545,9 @@ Return JSON with:
         next_docs = self._normalize_list(synthesis.get("WHAT_TO_GET_NEXT", synthesis.get("what_to_get_next", [])))
         financial = synthesis.get("FINANCIAL_SUMMARY", synthesis.get("financial_summary", {}))
         
+        # Get Property Appraiser SF baseline
+        pa_sf = state.get("property_appraiser_sf")
+        
         # Build report
         report = {
             "success": True,
@@ -522,9 +558,15 @@ Return JSON with:
                 for d in state["extracted_documents"]
             ],
             
+            # Property Appraiser Baseline (the TRUTH)
+            "property_appraiser_sf": pa_sf,
+            
             # RSF Analysis (Don's focus)
-            "rsf_reconciliation": rsf,
-            "rsf_recovery_sf": recovery.get("recoverable_sf", recovery.get("discrepancy_sf", 0)),
+            "rsf_reconciliation": {
+                **rsf,
+                "property_appraiser_sf": pa_sf,  # Include baseline in reconciliation
+            },
+            "rsf_recovery_sf": recovery.get("recoverable_sf", recovery.get("sf", recovery.get("discrepancy_sf", 0))),
             "rsf_recovery_annual_value": recovery.get("annual_value", recovery.get("potential_recovery", 0)),
             
             # Scoring
