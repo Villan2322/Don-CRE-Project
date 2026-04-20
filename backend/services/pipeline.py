@@ -726,10 +726,11 @@ Return ONLY the extracted text."""
         """Extract structured data from one document."""
         doc_type = doc.get("doc_type", "UNKNOWN")
         
-        # Get config for this doc type
-        config = EXTRACTION_PROMPTS.get(doc_type)
+        # Get config for this doc type — fall back to RENT_ROLL for UNKNOWN
+        # (most uploads are rent rolls; better to attempt extraction than skip)
+        config = EXTRACTION_PROMPTS.get(doc_type) or EXTRACTION_PROMPTS.get("RENT_ROLL")
         if not config:
-            return {"_note": f"No extraction config for {doc_type}", "raw_text_sample": doc.get("text", "")[:500]}
+            return {"_note": f"No extraction config for {doc_type}"}
         
         text = doc.get("text", "")
         # Truncate to avoid token limits
@@ -800,7 +801,8 @@ For numeric values (SF, rent, etc), extract just the number without formatting."
         Synthesize all extracted data into a comprehensive analysis.
         Focus: RSF discrepancies and recovery opportunities.
         """
-        # Group docs by type
+        # Group docs by type — strip all raw text from extraction before synthesis
+        # to prevent context window overflow on large documents
         by_type = {}
         for doc in documents:
             dtype = doc.get("doc_type", "UNKNOWN")
@@ -808,7 +810,7 @@ For numeric values (SF, rent, etc), extract just the number without formatting."
                 by_type[dtype] = []
             by_type[dtype].append({
                 "filename": doc.get("filename"),
-                "extraction": doc.get("extraction", {}),
+                "extraction": self._slim_extraction(doc.get("extraction", {})),
                 "enriched": doc.get("enriched", {}),
             })
         
@@ -842,13 +844,28 @@ NOTE: No Property Appraiser SF was provided as baseline.
 Compare SF across available documents only.
 """
         
+        # Cap payload size — if slimmed summary is still too large, truncate tenant arrays
+        summary_json = json.dumps(summary, indent=2, default=str)
+        MAX_PAYLOAD_CHARS = 60_000  # ~15k tokens — safe for all models
+        if len(summary_json) > MAX_PAYLOAD_CHARS:
+            if self.tracer:
+                self.tracer.log("STAGE_4", f"Summary payload {len(summary_json):,} chars — truncating tenant arrays", "warning")
+            # Truncate tenant arrays in each doc's extraction to max 30 rows
+            for dtype_docs in by_type.values():
+                for doc_entry in dtype_docs:
+                    ext = doc_entry.get("extraction", {})
+                    if isinstance(ext.get("tenants"), list) and len(ext["tenants"]) > 30:
+                        ext["tenants"] = ext["tenants"][:30]
+            summary["extractions"] = by_type
+            summary_json = json.dumps(summary, indent=2, default=str)
+
         prompt = f"""Analyze this CRE deal package and produce a comprehensive JSON report.
 
 CRITICAL FOCUS: Identify RSF (rentable square footage) discrepancies between sources.
 {pa_context}
 
 Deal Package:
-{json.dumps(summary, indent=2, default=str)}
+{summary_json}
 
 YOU MUST return ONLY valid JSON with EXACTLY these top-level keys (no others, no renaming):
 
@@ -1073,6 +1090,42 @@ RULES:
             "_raw_synthesis": synthesis,
         }
     
+    def _slim_extraction(self, extraction: dict, _depth: int = 0) -> dict:
+        """
+        Recursively strip raw text fields from an extraction dict.
+        Prevents context window overflow when large documents are sent to synthesis.
+        Removes: source_text, raw_text, raw_text_sample, _note fields.
+        Truncates any string value longer than 300 chars.
+        """
+        if not isinstance(extraction, dict):
+            return extraction
+
+        STRIP_KEYS = {"source_text", "raw_text", "raw_text_sample", "_note", "text", "full_text"}
+        result = {}
+
+        for k, v in extraction.items():
+            if k in STRIP_KEYS:
+                continue
+            if isinstance(v, dict):
+                result[k] = self._slim_extraction(v, _depth + 1)
+            elif isinstance(v, list):
+                slimmed = []
+                for item in v:
+                    if isinstance(item, dict):
+                        slimmed.append(self._slim_extraction(item, _depth + 1))
+                    elif isinstance(item, str) and len(item) > 300:
+                        slimmed.append(item[:300] + "...")
+                    else:
+                        slimmed.append(item)
+                result[k] = slimmed
+            elif isinstance(v, str) and len(v) > 300:
+                # Keep short strings, truncate long ones (likely raw text that snuck in)
+                result[k] = v[:300] + "..."
+            else:
+                result[k] = v
+
+        return result
+
     def _extract_tenants(self, synthesis: dict) -> list:
         """
         Extract tenants from synthesis, trying every key the AI might use.
