@@ -265,30 +265,45 @@ class CREPipeline:
         
         # Method 1: PyPDF2 text extraction
         text = self._extract_pdf_text(content)
-        if text and len(text.strip()) > 100 and "[PDF extraction error" not in text:
-            doc["extraction_method"] = "pdf_text"
-            return text, True
         
+        # Check for extraction errors
         if text and "[PDF extraction error" in text:
             doc["extraction_errors"].append(text)
+            # Even if there's an error message, we'll include it so the AI knows what happened
+            doc["extraction_method"] = "pdf_error"
+            return text, True  # Return True so the document is included with the error info
         
-        # Method 2: If sparse text, try OCR via AI vision
+        # Check if we got meaningful text
+        if text and len(text.strip()) > 100:
+            doc["extraction_method"] = "pdf_text"
+            if self.tracer:
+                self.tracer.log("INGEST", f"  -> PDF text: {len(text):,} chars extracted", "success")
+            return text, True
+        
+        # Sparse text - the PDF might be scanned or have minimal content
+        sparse_chars = len(text.strip()) if text else 0
         if self.tracer:
-            self.tracer.log("INGEST", f"  -> PDF text sparse ({len(text.strip())} chars), trying AI vision...", "info")
+            self.tracer.log("INGEST", f"  -> PDF has sparse text ({sparse_chars} chars). This may be a scanned document.", "warning")
         
-        ocr_text, ocr_success = await self._try_ocr(content, filename, doc)
-        if ocr_success and len(ocr_text.strip()) > 50:
-            doc["extraction_method"] = "pdf_ocr"
-            return ocr_text, True
+        # For scanned PDFs, we can't do true OCR without a specialized service
+        # But we should still include the document with helpful info
+        helpful_message = f"""[PDF ANALYSIS for {filename}]
+
+This PDF appears to be scanned or image-based with minimal extractable text ({sparse_chars} characters found).
+
+What was found:
+{text.strip() if text else '(no text extracted)'}
+
+RECOMMENDATION: For accurate RSF analysis, please provide one of:
+1. A text-based PDF (where you can select/copy text)
+2. An Excel rent roll export
+3. The original document in a different format
+
+Note: The Property Appraiser SF baseline of {getattr(self, '_property_appraiser_sf', 'N/A')} SF has been recorded and will be used for comparison once readable rent roll data is provided."""
         
-        # Method 3: If all else fails, combine what we have
-        combined = text.strip() + "\n\n" + ocr_text.strip() if ocr_text else text
-        if combined and len(combined.strip()) > 20:
-            doc["extraction_method"] = "pdf_combined"
-            return combined, True
-        
-        doc["extraction_errors"].append("PDF appears to be empty or unreadable")
-        return "", False
+        doc["extraction_method"] = "pdf_sparse"
+        doc["extraction_errors"].append(f"PDF has only {sparse_chars} chars of extractable text - likely scanned")
+        return helpful_message, True  # Return True so document is included with helpful info
     
     async def _try_extract_excel(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
         """Try to extract text from Excel file."""
@@ -417,20 +432,28 @@ class CREPipeline:
     
     async def _ocr_document(self, content: str | bytes, filename: str) -> str:
         """
-        OCR a scanned document or image using AI vision.
-        Uses OpenAI-compatible format that works with OpenRouter.
+        OCR a scanned document or image.
+        For PDFs, we describe the situation and ask AI to help.
+        For images, we try vision API if available.
         """
+        ext = self._get_ext(filename)
+        
+        # PDFs cannot be OCR'd directly through OpenRouter vision API
+        # Instead, we'll note this limitation and let the AI know
+        if ext == "pdf":
+            # The PDF text extraction already failed if we're here
+            # We can't do true OCR without a specialized service
+            return f"[PDF OCR required: The PDF '{filename}' appears to be scanned/image-based. Text extraction found minimal content. Please ensure the PDF has selectable text, or provide a text-based version of this document.]"
+        
+        # For actual images, try vision API
         try:
             if isinstance(content, bytes):
                 b64_content = base64.b64encode(content).decode("utf-8")
             else:
-                # Might already be base64
                 b64_content = content
             
             # Determine media type for data URL
-            ext = self._get_ext(filename)
             media_types = {
-                "pdf": "application/pdf",
                 "png": "image/png",
                 "jpg": "image/jpeg",
                 "jpeg": "image/jpeg",
@@ -440,10 +463,12 @@ class CREPipeline:
             }
             media_type = media_types.get(ext, "image/png")
             
-            # For PDFs, we need to handle differently - Claude can read PDFs directly
-            # but through OpenRouter we use a vision-capable model
+            # Check file size - OpenRouter has limits
+            content_bytes = content if isinstance(content, bytes) else base64.b64decode(content)
+            if len(content_bytes) > 5 * 1024 * 1024:  # 5MB limit
+                return f"[OCR error: Image too large ({len(content_bytes) / 1024 / 1024:.1f}MB). Please provide a smaller image or text-based document.]"
             
-            # Use OpenAI-compatible vision format (works with OpenRouter)
+            # Use OpenAI-compatible vision format
             response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=8000,
@@ -467,7 +492,7 @@ CRITICAL INSTRUCTIONS:
 3. Include all numbers, dates, addresses, names
 4. If this is a rent roll, extract: Tenant Name, Suite, SF, Rent, Lease Dates
 5. If this is a lease, extract: Parties, Premises, Term, Rent, SF
-6. Return ONLY the extracted text, no commentary or explanations
+6. Return ONLY the extracted text, no commentary
 
 Begin extraction:"""
                             }
@@ -479,9 +504,11 @@ Begin extraction:"""
             return response.choices[0].message.content
         except Exception as e:
             error_msg = str(e)
-            # Check for common vision API errors
+            # Provide helpful error message
+            if "400" in error_msg:
+                return f"[OCR error: Vision API request failed. The image format may not be supported. Please provide a text-based document instead.]"
             if "vision" in error_msg.lower() or "image" in error_msg.lower():
-                return f"[OCR error: Model may not support vision. {error_msg}]"
+                return f"[OCR error: Model may not support vision. Please provide a text-based document.]"
             return f"[OCR error: {error_msg}]"
     
     # =========================================================================

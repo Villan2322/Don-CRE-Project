@@ -79,12 +79,15 @@ interface AnalysisAPIResponse {
     category?: string
     severity?: string
     title?: string
+    flag?: string  // Backend uses 'flag' as the identifier/description
     description?: string
-    message?: string  // Backend uses 'message' field
+    message?: string
     issue?: string
+    impact?: string  // Backend returns 'impact' directly
     financial_impact?: number
+    resolution?: string  // Backend returns 'resolution' directly
     recommended_action?: string
-    recommendation?: string  // Backend uses 'recommendation' field
+    recommendation?: string
     action?: string
   }>
   what_to_get_next?: Array<string | { document?: string; why_needed?: string; priority?: number }>
@@ -120,14 +123,14 @@ export default function DashboardPage() {
     const propertyAppraiserSf = result.property_appraiser_sf ?? result.rsf_analysis?.reconciliation?.property_appraiser_sf ?? 0
 
     // Transform API response to match DealAnalysis type from lib/types.ts
-    // Backend uses 'message', frontend expects 'description'
-    const redFlags: RedFlag[] = (result.red_flags || []).map((flag, i) => ({
-      id: flag.id || `flag-${i}`,
-      category: flag.category || 'General',
-      severity: (flag.severity?.toUpperCase() === 'CRITICAL' ? 'HIGH' : flag.severity?.toUpperCase() || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
-      description: flag.description || flag.message || flag.issue || 'No description provided',
-      impact: flag.financial_impact ? `$${flag.financial_impact.toLocaleString()} potential impact` : 'Review document for details',
-      resolution: flag.recommended_action || flag.recommendation || flag.action || 'Gather additional documentation',
+    // Backend uses: flag (identifier), impact (string), resolution (string), severity
+    const redFlags: RedFlag[] = (result.red_flags || []).map((rf, i) => ({
+      id: rf.id || `flag-${i}`,
+      category: rf.category || rf.flag?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'General',
+      severity: (rf.severity?.toUpperCase() === 'CRITICAL' ? 'HIGH' : rf.severity?.toUpperCase() || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
+      description: rf.description || rf.message || rf.issue || rf.flag?.replace(/_/g, ' ') || 'No description provided',
+      impact: rf.impact || (rf.financial_impact ? `$${rf.financial_impact.toLocaleString()} potential impact` : 'Review document for details'),
+      resolution: rf.resolution || rf.recommended_action || rf.recommendation || rf.action || 'Gather additional documentation',
     }))
 
     const tenants: Tenant[] = (result.tenants || []).map((t, i) => ({
