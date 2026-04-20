@@ -451,6 +451,24 @@ class CREPipeline:
                 doc["classification_error"] = str(result)
             else:
                 doc.update(result)
+
+            # Content-aware override: if classified as non-rent-roll but the document
+            # contains clear rent roll signals (SF column + rent column + multiple tenants),
+            # upgrade to RENT_ROLL so the extraction pass gets the right schema as primary.
+            doc_type = doc.get("doc_type", "UNKNOWN")
+            text = doc.get("text", "").lower()
+            if doc_type in ("MANAGEMENT_REPORT", "FINANCIAL_MODEL", "UNKNOWN"):
+                rr_signals = [
+                    "rsf" in text or "sq ft" in text or "square feet" in text,
+                    "monthly rent" in text or "annual rent" in text or "rent/sf" in text or "per sf" in text,
+                    "lease start" in text or "lease end" in text or "expir" in text or "commence" in text,
+                    text.count("|") > 10 or text.count("\t") > 20,  # table structure
+                ]
+                if sum(rr_signals) >= 3:
+                    self.tracer.log("CLASSIFY", f"Content override: {doc_type} -> RENT_ROLL (rent roll signals detected)", "warning")
+                    doc["doc_type"] = "RENT_ROLL"
+                    doc["original_doc_type"] = doc_type
+
         return documents
 
     async def _classify_one(self, doc: dict) -> dict:
@@ -497,36 +515,64 @@ class CREPipeline:
     # =========================================================================
 
     async def _extract_all(self, documents: list[dict]) -> list[dict]:
-        tasks = [self._extract_one(doc) for doc in documents]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for doc, result in zip(documents, results):
-            if isinstance(result, Exception):
-                doc["extraction"] = {"error": str(result)}
-            else:
-                doc["extraction"] = result
+        # For each document, always run a RENT_ROLL extraction pass in parallel with the typed pass.
+        # This guarantees tenant data is captured even when a multi-section PDF is misclassified.
+        typed_tasks   = [self._extract_one(doc, doc.get("doc_type", "UNKNOWN")) for doc in documents]
+        rr_tasks      = [self._extract_one(doc, "RENT_ROLL") for doc in documents]
+
+        typed_results = await asyncio.gather(*typed_tasks, return_exceptions=True)
+        rr_results    = await asyncio.gather(*rr_tasks,    return_exceptions=True)
+
+        for doc, typed_res, rr_res in zip(documents, typed_results, rr_results):
+            typed = typed_res if not isinstance(typed_res, Exception) else {"error": str(typed_res)}
+            rr    = rr_res    if not isinstance(rr_res, Exception)    else {}
+
+            # Merge: typed result is primary; inject rent-roll tenants/summary if typed has none
+            merged = dict(typed)
+            if not merged.get("tenants") and rr.get("tenants"):
+                merged["tenants"] = rr["tenants"]
+                merged["_tenants_from_rr_pass"] = True
+            if not merged.get("summary") and rr.get("summary"):
+                merged["summary"] = rr["summary"]
+
+            doc["extraction"] = merged
             if doc.get("doc_type") in ["LEASE", "LEASE_ABSTRACT"]:
                 self._enrich_lease(doc)
+
+            self.tracer.log(
+                "EXTRACT",
+                f"{doc.get('filename')} ({doc.get('doc_type')}): "
+                f"{len(merged.get('tenants') or [])} tenants extracted"
+                + (" [from RR fallback pass]" if merged.get("_tenants_from_rr_pass") else ""),
+                "info"
+            )
+
         return documents
 
-    async def _extract_one(self, doc: dict) -> dict:
-        doc_type = doc.get("doc_type", "UNKNOWN")
-
-        # Fall back to RENT_ROLL for unknown docs — most uploads are rent rolls
+    async def _extract_one(self, doc: dict, doc_type: str) -> dict:
+        """Extract structured data from one document using the given doc_type schema."""
         config = EXTRACTION_PROMPTS.get(doc_type) or EXTRACTION_PROMPTS.get("RENT_ROLL")
         if not config:
             return {"_note": f"No extraction config for {doc_type}"}
 
         text = doc.get("text", "")
-        # Hard cap: send at most 30k chars to extraction to avoid token overflow
+        # Hard cap: 30k chars max per extraction call
         if len(text) > 30000:
-            text = text[:15000] + "\n\n[...middle truncated for token limit...]\n\n" + text[-15000:]
+            # Keep beginning and end — rent roll tables are usually at the start,
+            # management report summaries at the beginning, totals at the end
+            text = text[:20000] + "\n\n[...middle truncated...]\n\n" + text[-10000:]
 
         prompt = (
-            f"Extract all structured data from this {doc_type} document.\n"
+            f"Extract all structured data from this document as if it were a {doc_type}.\n"
             f"Fields needed: {', '.join(config.get('fields', []))}\n\n"
-            f"Document:\n{text}\n\n"
-            "Return ONLY valid JSON. For numeric values return bare numbers (no $, commas, or units). "
-            "Return null for fields not found. Do NOT include source_text fields in the output."
+            f"Document text:\n{text}\n\n"
+            "CRITICAL RULES:\n"
+            "- Return ONLY valid JSON. No markdown fences.\n"
+            "- For numeric values use bare numbers — no $, commas, or units.\n"
+            "- Return null for fields not found in the document.\n"
+            "- Do NOT include source_text, confidence, or citation fields.\n"
+            "- For tenants: extract EVERY tenant row found, even if data is partial.\n"
+            "- tenant_name and rsf are the minimum required fields per tenant."
         )
 
         response = await self.client.chat.completions.create(
@@ -621,6 +667,9 @@ class CREPipeline:
 
         # Single unified prompt — NO separate system prompt to avoid schema conflicts
         prompt = f"""You are a commercial real estate deal analyst. Analyze this CRE deal package and return a comprehensive report.
+
+IMPORTANT: A single uploaded PDF may contain multiple document types (rent roll + management report + AR aging all in one file).
+Do NOT penalize the deal score for "missing" documents when all the data is present in the extractions below.
 {pa_block}
 DEAL PACKAGE:
 {summary_json}
