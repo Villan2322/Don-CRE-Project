@@ -184,6 +184,7 @@ class CREPipeline:
     async def _ingest_files(self, files: list[dict]) -> list[dict]:
         """
         Ingest any files - auto-detect type, OCR if needed, extract text.
+        Uses multiple fallback strategies to ensure every document is readable.
         """
         documents = []
         
@@ -192,41 +193,126 @@ class CREPipeline:
             content = file.get("content", "")
             content_type = file.get("content_type", self._guess_content_type(filename))
             
+            if self.tracer:
+                self.tracer.log("INGEST", f"Processing: {filename}", "info")
+            
             doc = {
                 "id": f"doc_{i}",
                 "filename": filename,
                 "content_type": content_type,
                 "file_ext": self._get_ext(filename),
                 "ingested_at": datetime.utcnow().isoformat(),
+                "extraction_method": None,
+                "extraction_errors": [],
             }
             
-            # Extract text based on file type
-            if self._is_excel(filename, content_type):
-                doc["text"] = await self._extract_excel_text(content, filename)
-                doc["source_type"] = "excel"
-            elif self._is_pdf(filename, content_type):
-                text = self._extract_pdf_text(content)
-                if len(text.strip()) < 100:
-                    # Likely scanned - needs OCR
-                    doc["text"] = await self._ocr_document(content, filename)
-                    doc["source_type"] = "pdf_ocr"
-                else:
-                    doc["text"] = text
-                    doc["source_type"] = "pdf_text"
-            elif self._is_image(filename, content_type):
-                doc["text"] = await self._ocr_document(content, filename)
-                doc["source_type"] = "image_ocr"
-            else:
-                # Assume it's already text
-                doc["text"] = content if isinstance(content, str) else str(content)
-                doc["source_type"] = "text"
+            text = ""
+            extraction_success = False
             
-            # Only include if we got meaningful text
-            if doc.get("text") and len(doc["text"].strip()) > 50:
-                doc["char_count"] = len(doc["text"])
+            # Extract text based on file type with fallback chain
+            if self._is_excel(filename, content_type):
+                text, success = await self._try_extract_excel(content, filename, doc)
+                extraction_success = success
+                
+            elif self._is_pdf(filename, content_type):
+                # Try multiple extraction methods for PDFs
+                text, success = await self._try_extract_pdf(content, filename, doc)
+                extraction_success = success
+                
+            elif self._is_image(filename, content_type):
+                text, success = await self._try_ocr(content, filename, doc)
+                extraction_success = success
+                
+            else:
+                # Assume it's already text or try to decode
+                if isinstance(content, bytes):
+                    try:
+                        text = content.decode('utf-8')
+                        doc["extraction_method"] = "text_decode"
+                        extraction_success = True
+                    except:
+                        text = str(content)
+                        doc["extraction_method"] = "text_fallback"
+                else:
+                    text = str(content) if content else ""
+                    doc["extraction_method"] = "text_direct"
+                    extraction_success = bool(text)
+            
+            doc["text"] = text
+            doc["char_count"] = len(text) if text else 0
+            
+            # Include document even if extraction failed - AI can still try to help
+            if text and len(text.strip()) > 20:
+                doc["source_type"] = doc.get("extraction_method", "unknown")
                 documents.append(doc)
+                if self.tracer:
+                    self.tracer.log("INGEST", f"  -> {doc['extraction_method']}: {len(text):,} chars extracted", "success")
+            elif not extraction_success:
+                # Include with error so user knows what happened
+                doc["source_type"] = "extraction_failed"
+                doc["text"] = f"[EXTRACTION FAILED for {filename}]\n\nErrors encountered:\n" + "\n".join(doc["extraction_errors"])
+                documents.append(doc)
+                if self.tracer:
+                    self.tracer.log("INGEST", f"  -> FAILED: {'; '.join(doc['extraction_errors'][:2])}", "error")
+            else:
+                if self.tracer:
+                    self.tracer.log("INGEST", f"  -> Minimal content ({len(text)} chars)", "warning")
         
         return documents
+    
+    async def _try_extract_pdf(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
+        """Try multiple methods to extract text from PDF."""
+        
+        # Method 1: PyPDF2 text extraction
+        text = self._extract_pdf_text(content)
+        if text and len(text.strip()) > 100 and "[PDF extraction error" not in text:
+            doc["extraction_method"] = "pdf_text"
+            return text, True
+        
+        if text and "[PDF extraction error" in text:
+            doc["extraction_errors"].append(text)
+        
+        # Method 2: If sparse text, try OCR via AI vision
+        if self.tracer:
+            self.tracer.log("INGEST", f"  -> PDF text sparse ({len(text.strip())} chars), trying AI vision...", "info")
+        
+        ocr_text, ocr_success = await self._try_ocr(content, filename, doc)
+        if ocr_success and len(ocr_text.strip()) > 50:
+            doc["extraction_method"] = "pdf_ocr"
+            return ocr_text, True
+        
+        # Method 3: If all else fails, combine what we have
+        combined = text.strip() + "\n\n" + ocr_text.strip() if ocr_text else text
+        if combined and len(combined.strip()) > 20:
+            doc["extraction_method"] = "pdf_combined"
+            return combined, True
+        
+        doc["extraction_errors"].append("PDF appears to be empty or unreadable")
+        return "", False
+    
+    async def _try_extract_excel(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
+        """Try to extract text from Excel file."""
+        text = await self._extract_excel_text(content, filename)
+        
+        if text and "[Excel extraction error" not in text:
+            doc["extraction_method"] = "excel"
+            return text, True
+        
+        doc["extraction_errors"].append(text if text else "Excel extraction failed")
+        return "", False
+    
+    async def _try_ocr(self, content: bytes | str, filename: str, doc: dict) -> tuple[str, bool]:
+        """Try OCR with fallback error handling."""
+        text = await self._ocr_document(content, filename)
+        
+        if text and "[OCR error" not in text and len(text.strip()) > 20:
+            doc["extraction_method"] = "ocr"
+            return text, True
+        
+        if text and "[OCR error" in text:
+            doc["extraction_errors"].append(text)
+        
+        return text or "", False
     
     def _guess_content_type(self, filename: str) -> str:
         """Guess MIME type from filename."""
@@ -259,9 +345,10 @@ class CREPipeline:
         return ext in ["png", "jpg", "jpeg", "tiff", "tif"] or content_type.startswith("image/")
     
     def _extract_pdf_text(self, content: str | bytes) -> str:
-        """Extract text from PDF using PyPDF2."""
+        """Extract text from PDF using PyPDF2 with enhanced error handling."""
         try:
             from PyPDF2 import PdfReader
+            from PyPDF2.errors import PdfReadError
             
             if isinstance(content, str):
                 # Might be base64 encoded
@@ -270,13 +357,37 @@ class CREPipeline:
                 except:
                     return content  # Already text
             
-            pdf = PdfReader(io.BytesIO(content))
+            # Ensure we have bytes
+            if not isinstance(content, bytes):
+                return "[PDF extraction error: Invalid content type]"
+            
+            try:
+                pdf = PdfReader(io.BytesIO(content))
+            except PdfReadError as e:
+                if "encrypt" in str(e).lower():
+                    return "[PDF extraction error: PDF is encrypted/password-protected]"
+                return f"[PDF extraction error: Cannot read PDF - {e}]"
+            
             text_parts = []
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
+            page_count = len(pdf.pages)
+            
+            for i, page in enumerate(pdf.pages):
+                try:
+                    text = page.extract_text()
+                    if text and text.strip():
+                        # Clean up common OCR artifacts
+                        text = text.replace('\x00', '')  # Remove null bytes
+                        text_parts.append(f"--- Page {i+1} of {page_count} ---\n{text}")
+                except Exception as page_error:
+                    text_parts.append(f"--- Page {i+1} of {page_count} ---\n[Page extraction failed: {page_error}]")
+            
+            if not text_parts:
+                return "[PDF extraction error: No text found in PDF - may be scanned/image-based]"
+            
             return "\n\n".join(text_parts)
+            
+        except ImportError:
+            return "[PDF extraction error: PyPDF2 not installed]"
         except Exception as e:
             return f"[PDF extraction error: {e}]"
     
@@ -306,15 +417,17 @@ class CREPipeline:
     
     async def _ocr_document(self, content: str | bytes, filename: str) -> str:
         """
-        OCR a scanned document or image using Claude's vision.
+        OCR a scanned document or image using AI vision.
+        Uses OpenAI-compatible format that works with OpenRouter.
         """
         try:
             if isinstance(content, bytes):
                 b64_content = base64.b64encode(content).decode("utf-8")
             else:
+                # Might already be base64
                 b64_content = content
             
-            # Determine media type
+            # Determine media type for data URL
             ext = self._get_ext(filename)
             media_types = {
                 "pdf": "application/pdf",
@@ -322,9 +435,15 @@ class CREPipeline:
                 "jpg": "image/jpeg",
                 "jpeg": "image/jpeg",
                 "tiff": "image/tiff",
+                "gif": "image/gif",
+                "webp": "image/webp",
             }
             media_type = media_types.get(ext, "image/png")
             
+            # For PDFs, we need to handle differently - Claude can read PDFs directly
+            # but through OpenRouter we use a vision-capable model
+            
+            # Use OpenAI-compatible vision format (works with OpenRouter)
             response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=8000,
@@ -333,16 +452,24 @@ class CREPipeline:
                         "role": "user",
                         "content": [
                             {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": b64_content,
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{b64_content}",
                                 }
                             },
                             {
                                 "type": "text",
-                                "text": "Extract ALL text from this document. Preserve the structure including tables, columns, and formatting. Return only the extracted text, no commentary."
+                                "text": """Extract ALL text from this document image. This is a commercial real estate document.
+
+CRITICAL INSTRUCTIONS:
+1. Extract EVERY piece of text you can see
+2. Preserve table structure using | separators for columns
+3. Include all numbers, dates, addresses, names
+4. If this is a rent roll, extract: Tenant Name, Suite, SF, Rent, Lease Dates
+5. If this is a lease, extract: Parties, Premises, Term, Rent, SF
+6. Return ONLY the extracted text, no commentary or explanations
+
+Begin extraction:"""
                             }
                         ]
                     }
@@ -351,7 +478,11 @@ class CREPipeline:
             
             return response.choices[0].message.content
         except Exception as e:
-            return f"[OCR error: {e}]"
+            error_msg = str(e)
+            # Check for common vision API errors
+            if "vision" in error_msg.lower() or "image" in error_msg.lower():
+                return f"[OCR error: Model may not support vision. {error_msg}]"
+            return f"[OCR error: {error_msg}]"
     
     # =========================================================================
     # STAGE 2: Classification - What type of document is this?
