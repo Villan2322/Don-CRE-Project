@@ -475,11 +475,19 @@ class CREPipeline:
             doc_type = doc.get("doc_type", "UNKNOWN")
             text     = doc.get("text", "")
 
-            # Always: typed extraction pass
+            # Pass 1 — typed extraction using the doc's own schema
             all_tasks.append(self._extract_one(doc_type, text, doc.get("filename", "")))
             task_map.append((i, "typed"))
 
-            # For large docs: chunked RENT_ROLL passes to cover every page
+            # Pass 2 — always run a dedicated RENT_ROLL pass regardless of doc type.
+            # Management reports, financial models, and other multi-section docs
+            # often embed a tenant schedule that the typed pass misses.
+            # A single RENT_ROLL pass covers docs under CHUNK_SIZE without chunking.
+            if doc_type != "RENT_ROLL":  # skip if already a rent roll — typed pass IS the RR pass
+                all_tasks.append(self._extract_one("RENT_ROLL", text[:CHUNK_SIZE], doc.get("filename", "")))
+                task_map.append((i, "rr_fallback"))
+
+            # Pass 3+ — chunked RENT_ROLL passes for large docs (covers every page)
             if len(text) > CHUNK_SIZE:
                 start, chunk_idx = 0, 0
                 while start < len(text):
@@ -490,9 +498,9 @@ class CREPipeline:
                     if end >= len(text):
                         break
                     start = end - OVERLAP
-                self.tracer.log("HOP_3", f"  {doc['filename']}: {len(text):,} chars split into {chunk_idx} chunk(s)", "info")
+                self.tracer.log("HOP_3", f"  {doc['filename']}: {len(text):,} chars — typed + {chunk_idx} chunk(s)", "info")
             else:
-                self.tracer.log("HOP_3", f"  {doc['filename']}: {len(text):,} chars (single pass)", "info")
+                self.tracer.log("HOP_3", f"  {doc['filename']}: {len(text):,} chars — typed + RR fallback pass", "info")
 
         all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
@@ -561,6 +569,18 @@ class CREPipeline:
         if len(text) > 30000:
             text = text[:30000]
 
+        # Extra instruction for doc types that embed tenant rosters inside larger reports
+        tenant_instruction = ""
+        if doc_type in ("MANAGEMENT_REPORT", "FINANCIAL_MODEL", "CAM_RECONCILIATION", "RENT_ROLL"):
+            tenant_instruction = (
+                "\n- TENANT ROSTER: Scan the entire document for any section labelled "
+                "'Rent Schedule', 'Tenant Roster', 'Occupancy', 'Rent Roll', or any table "
+                "with tenant names and square footages. Extract EVERY row as a separate "
+                "object in the 'tenants' array. Do not skip any tenant even if data is partial.\n"
+                "- Minimum fields per tenant: tenant_name and rsf (or monthly_base_rent).\n"
+                "- Vacant units should be included with tenant_name: 'Vacant'."
+            )
+
         prompt = (
             f"Extract all structured data from this CRE document treating it as a {doc_type}.\n"
             f"Fields needed: {', '.join(fields)}\n\n"
@@ -572,7 +592,9 @@ class CREPipeline:
             "- Do NOT include source_text, confidence, or citation fields.\n"
             "- For tenants: extract EVERY row found even if incomplete. Minimum: tenant_name + rsf.\n"
             "- tenant_name field must be exactly: tenant_name (not 'tenant' or 'name').\n"
-            "- If you see a totals/summary row at the bottom, put it in 'summary.total_rsf' and 'summary.total_annual_rent'."
+            "- If you see a totals/summary row at the bottom, put it in 'summary.total_rsf' "
+            "and 'summary.total_annual_rent'."
+            + tenant_instruction
         )
         response = await self.client.chat.completions.create(
             model=self.model,

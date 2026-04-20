@@ -239,13 +239,16 @@ Return ONLY valid JSON matching the schema.""",
     
     "MANAGEMENT_REPORT": {
         "system_prompt": """You are analyzing a property management report.
-Extract operational metrics, income/expense data, and tenant updates.
+Management reports often contain a rent schedule or tenant roster section in addition to
+financial summaries. Extract BOTH the financial metrics AND every tenant row found.
 Return ONLY valid JSON matching the schema.""",
         "fields": [
             "report_period", "property_name", "gross_potential_rent",
             "vacancy_loss", "effective_gross_income", "operating_expenses",
             "noi", "debt_service", "cash_flow", "occupancy_rate",
-            "collections_summary", "ar_aging", "tenant_updates", "capital_projects"
+            "collections_summary", "ar_aging", "tenant_updates", "capital_projects",
+            # Tenant roster — extract every row found in any rent schedule section
+            "tenants"
         ],
         "output_schema": {
             "type": "object",
@@ -259,7 +262,33 @@ Return ONLY valid JSON matching the schema.""",
                 "noi": {"type": "number"},
                 "occupancy_rate": {"type": "number"},
                 "ar_aging": {"type": "object"},
-                "tenant_updates": {"type": "array"}
+                "tenant_updates": {"type": "array"},
+                "tenants": {
+                    "type": "array",
+                    "description": "Every tenant row found in any rent schedule, tenant roster, or occupancy section",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "suite": {"type": "string"},
+                            "rsf": {"type": "number"},
+                            "lease_start": {"type": "string"},
+                            "lease_end": {"type": "string"},
+                            "monthly_base_rent": {"type": "number"},
+                            "annual_base_rent": {"type": "number"},
+                            "status": {"type": "string"},
+                            "ar_balance": {"type": "number"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_rsf": {"type": "number"},
+                        "total_annual_rent": {"type": "number"},
+                        "occupancy_rate": {"type": "number"}
+                    }
+                }
             }
         }
     },
