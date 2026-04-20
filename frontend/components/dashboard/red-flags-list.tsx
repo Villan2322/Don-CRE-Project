@@ -46,7 +46,7 @@ export function RedFlagsList({ flags, limit }: RedFlagsListProps) {
       </div>
       <div className="divide-y divide-border">
         {displayFlags.map((flag) => {
-          const config = severityConfig[flag.severity]
+          const config = severityConfig[flag.severity] ?? severityConfig['LOW']
           const Icon = config.icon
           return (
             <div key={flag.id} className="p-4">

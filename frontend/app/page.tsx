@@ -129,14 +129,23 @@ export default function DashboardPage() {
 
     // Transform API response to match DealAnalysis type from lib/types.ts
     // Backend uses: flag (identifier), impact (string), resolution (string), severity
-    const redFlags: RedFlag[] = (result.red_flags || []).map((rf, i) => ({
-      id: rf.id || `flag-${i}`,
-      category: rf.category || rf.flag?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'General',
-      severity: (rf.severity?.toUpperCase() === 'CRITICAL' ? 'HIGH' : rf.severity?.toUpperCase() || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
-      description: rf.description || rf.message || rf.issue || rf.flag?.replace(/_/g, ' ') || 'No description provided',
-      impact: rf.impact || (rf.financial_impact ? `$${rf.financial_impact.toLocaleString()} potential impact` : 'Review document for details'),
-      resolution: rf.resolution || rf.recommended_action || rf.recommendation || rf.action || 'Gather additional documentation',
-    }))
+    const normalizeSeverity = (s: string | undefined): 'HIGH' | 'MEDIUM' | 'LOW' => {
+      const val = (s || '').toUpperCase().trim()
+      if (['HIGH', 'CRITICAL'].includes(val)) return 'HIGH'
+      if (['MEDIUM', 'MODERATE', 'WARNING'].includes(val)) return 'MEDIUM'
+      return 'LOW'
+    }
+
+    const redFlags: RedFlag[] = (result.red_flags || [])
+      .filter((rf): rf is NonNullable<typeof rf> => rf != null)
+      .map((rf, i) => ({
+        id: rf.id || `flag-${i}`,
+        category: rf.category || rf.flag?.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) || 'General',
+        severity: normalizeSeverity(rf.severity),
+        description: rf.description || rf.message || rf.issue || rf.flag?.replace(/_/g, ' ') || 'No description provided',
+        impact: rf.impact || (rf.financial_impact ? `$${Number(rf.financial_impact).toLocaleString()} potential impact` : 'Review document for details'),
+        resolution: rf.resolution || rf.recommended_action || rf.recommendation || rf.action || 'Gather additional documentation',
+      }))
 
     const tenants: Tenant[] = (result.tenants || [])
       .filter((t): t is NonNullable<typeof t> => t != null)  // Filter null items
