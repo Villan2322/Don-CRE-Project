@@ -240,8 +240,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         }
       }
       
+      console.log('[v0] Setting analysis result:', result)
       setAnalysisResult(result)
-      onAnalysisComplete?.(result)
+      
+      // Call the callback to update parent state
+      if (onAnalysisComplete) {
+        console.log('[v0] Calling onAnalysisComplete callback')
+        onAnalysisComplete(result)
+      }
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Analysis failed'

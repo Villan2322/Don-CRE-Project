@@ -7,13 +7,26 @@ import { TabContent } from '@/components/dashboard/tab-content'
 import { mockDealAnalysis } from '@/lib/mock-data'
 import { TabId, DealAnalysis, RedFlag, Tenant, LeaseAbstract, UploadedDocument } from '@/lib/types'
 
-// API response type from the backend
+// API response type from the backend (matches actual backend output)
 interface AnalysisAPIResponse {
   success: boolean
   deal_name?: string
+  analyzed_at?: string
+  
+  // Top-level fields from backend
+  documents_processed?: number
+  property_appraiser_sf?: number
+  score?: number
+  tier?: string
+  rsf_recovery_sf?: number
+  rsf_recovery_annual_value?: number
+  
+  // Nested structures
   rsf_analysis?: {
     reconciliation: {
+      property_appraiser_sf?: number
       rent_roll_rsf?: number
+      rent_roll_total_sf?: number
       lease_rsf?: number
       boma_rsf?: number
       discrepancy_sf?: number
@@ -28,7 +41,9 @@ interface AnalysisAPIResponse {
   risk?: {
     score: number
     tier: string
-    red_flag_count: {
+    sub_scores?: Record<string, number>
+    red_flags?: Array<Record<string, unknown>>
+    red_flag_count?: {
       critical: number
       high: number
       moderate: number
@@ -36,9 +51,11 @@ interface AnalysisAPIResponse {
     }
   }
   tenants?: Array<{
-    name: string
+    name?: string
+    tenant?: string
     suite?: string
     rsf?: number
+    sf?: number
     annual_rent?: number
     monthly_rent?: number
     lease_start?: string
@@ -58,22 +75,28 @@ interface AnalysisAPIResponse {
     missing_fields?: string[]
   }>
   red_flags?: Array<{
-    id: string
-    category: string
-    severity: string
-    title: string
-    description: string
+    id?: string
+    category?: string
+    severity?: string
+    title?: string
+    description?: string
+    issue?: string
     financial_impact?: number
     recommended_action?: string
+    action?: string
   }>
-  what_to_get_next?: string[]
-  noi?: number
-  walt_months?: number
-  vacancy_pct?: number
+  what_to_get_next?: Array<string | { document?: string; why_needed?: string; priority?: number }>
+  financial?: {
+    noi?: number
+    vacancy?: number
+    walt?: number
+  }
   documents?: {
     total: number
-    files: Array<{ filename: string; type: string }>
+    files: Array<{ filename: string; type: string; confidence?: number }>
   }
+  trace_log?: Array<{ stage: string; message: string; level: string }>
+  error?: string
 }
 
 export default function DashboardPage() {
@@ -83,28 +106,42 @@ export default function DashboardPage() {
 
   // Called when analysis completes - transform API response to DealAnalysis format
   const handleAnalysisComplete = useCallback((result: AnalysisAPIResponse) => {
-    if (!result.success) return
+    console.log('[v0] handleAnalysisComplete called with:', result)
+    
+    if (!result.success) {
+      console.log('[v0] Analysis failed:', result.error)
+      return
+    }
+
+    // Use top-level fields from backend (not nested under risk/rsf_analysis)
+    const scoreValue = result.score ?? result.risk?.score ?? 0
+    const tierValue = result.tier ?? result.risk?.tier ?? 'YELLOW'
+    const rsfRecoverySf = result.rsf_recovery_sf ?? result.rsf_analysis?.recovery_opportunity?.sf ?? 0
+    const rsfRecoveryValue = result.rsf_recovery_annual_value ?? result.rsf_analysis?.recovery_opportunity?.annual_value ?? 0
+    const propertyAppraiserSf = result.property_appraiser_sf ?? result.rsf_analysis?.reconciliation?.property_appraiser_sf ?? 0
+
+    console.log('[v0] Extracted values:', { scoreValue, tierValue, rsfRecoverySf, rsfRecoveryValue, propertyAppraiserSf })
 
     // Transform API response to match DealAnalysis type from lib/types.ts
     const redFlags: RedFlag[] = (result.red_flags || []).map((flag, i) => ({
       id: flag.id || `flag-${i}`,
-      category: flag.category,
+      category: flag.category || 'General',
       severity: (flag.severity?.toUpperCase() === 'CRITICAL' ? 'HIGH' : flag.severity?.toUpperCase() || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
-      description: flag.description,
+      description: flag.description || flag.issue || 'No description',
       impact: flag.financial_impact ? `$${flag.financial_impact.toLocaleString()} potential impact` : 'Unknown impact',
-      resolution: flag.recommended_action,
+      resolution: flag.recommended_action || flag.action || 'Review required',
     }))
 
     const tenants: Tenant[] = (result.tenants || []).map((t, i) => ({
       id: `tenant-${i}`,
-      name: t.name,
+      name: t.name || t.tenant || 'Unknown Tenant',
       suite: t.suite || '',
-      rsf: t.rsf || 0,
+      rsf: t.rsf || t.sf || 0,
       bomaRsf: undefined,
       rsfDelta: undefined,
       monthlyRent: t.monthly_rent || (t.annual_rent ? t.annual_rent / 12 : 0),
       annualRent: t.annual_rent || 0,
-      rentPSF: t.rsf && t.annual_rent ? t.annual_rent / t.rsf : 0,
+      rentPSF: (t.rsf || t.sf) && t.annual_rent ? t.annual_rent / (t.rsf || t.sf || 1) : 0,
       leaseStart: t.lease_start || '',
       leaseExpiry: t.lease_end || null,
       monthsRemaining: t.months_remaining ?? null,
@@ -140,44 +177,52 @@ export default function DashboardPage() {
       status: 'PROCESSED' as const,
     }))
 
+    // Normalize whatToGetNext to string array
+    const whatToGetNext: string[] = (result.what_to_get_next || []).map(item => {
+      if (typeof item === 'string') return item
+      return item.document || 'Unknown document'
+    })
+
     const transformed: DealAnalysis = {
       id: crypto.randomUUID(),
       dealName: result.deal_name || 'Analysis Results',
-      propertyAddress: 'Uploaded Documents',
-      submittedAt: new Date().toISOString(),
-      score: result.risk?.score || 0,
-      tier: (result.risk?.tier?.toUpperCase() || 'YELLOW') as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
+      propertyAddress: propertyAppraiserSf ? `PA Baseline: ${propertyAppraiserSf.toLocaleString()} SF` : 'Uploaded Documents',
+      submittedAt: result.analyzed_at || new Date().toISOString(),
+      score: scoreValue,
+      tier: (tierValue.toUpperCase() || 'YELLOW') as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
       subScores: {
-        dataCompleteness: 70,
-        rsfAlignment: result.rsf_analysis?.discrepancy_found ? 50 : 90,
-        financialIntegrity: result.risk?.score || 0,
-        leaseLeverage: result.risk?.score || 0,
-        riskProfile: result.risk?.score || 0,
-        documentCoverage: Math.min(100, (result.documents?.total || 0) * 20),
+        dataCompleteness: result.risk?.sub_scores?.data_completeness ?? 70,
+        rsfAlignment: rsfRecoverySf > 0 ? 50 : 90,
+        financialIntegrity: result.risk?.sub_scores?.financial_integrity ?? scoreValue,
+        leaseLeverage: result.risk?.sub_scores?.lease_leverage ?? scoreValue,
+        riskProfile: result.risk?.sub_scores?.risk_profile ?? scoreValue,
+        documentCoverage: Math.min(100, (result.documents_processed || result.documents?.total || 0) * 20),
       },
       rsfReconciliation: {
-        bomaTotalSF: result.rsf_analysis?.reconciliation.boma_rsf || 0,
-        rentRollOccupiedSF: result.rsf_analysis?.reconciliation.rent_roll_rsf || 0,
-        deltaSF: result.rsf_analysis?.reconciliation.discrepancy_sf || 0,
-        deltaPercent: result.rsf_analysis?.reconciliation.discrepancy_pct || 0,
-        estimatedAnnualRecovery: result.rsf_analysis?.recovery_opportunity?.annual_value || 0,
-        alertTriggered: result.rsf_analysis?.discrepancy_found || false,
+        bomaTotalSF: propertyAppraiserSf || result.rsf_analysis?.reconciliation?.boma_rsf || 0,
+        rentRollOccupiedSF: result.rsf_analysis?.reconciliation?.rent_roll_rsf || result.rsf_analysis?.reconciliation?.rent_roll_total_sf || 0,
+        deltaSF: rsfRecoverySf || result.rsf_analysis?.reconciliation?.discrepancy_sf || 0,
+        deltaPercent: result.rsf_analysis?.reconciliation?.discrepancy_pct || 0,
+        estimatedAnnualRecovery: rsfRecoveryValue,
+        alertTriggered: rsfRecoverySf > 0 || (result.rsf_analysis?.discrepancy_found ?? false),
       },
       financialSummary: {
         totalAnnualRent: tenants.reduce((sum, t) => sum + t.annualRent, 0),
-        noi: result.noi || 0,
+        noi: result.financial?.noi ?? 0,
         capRate: 0,
         averageRentPSF: 0,
-        vacancy: result.vacancy_pct || 0,
+        vacancy: result.financial?.vacancy ?? 0,
         arDelinquency: 0,
       },
-      walt: result.walt_months || 0,
+      walt: result.financial?.walt ?? 0,
       redFlags,
-      whatToGetNext: result.what_to_get_next || [],
+      whatToGetNext,
       tenants,
       leaseAbstracts,
       documents,
     }
+
+    console.log('[v0] Transformed analysis:', transformed)
 
     setAnalysisData(transformed)
     setHasRealData(true)
