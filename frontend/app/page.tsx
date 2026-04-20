@@ -113,7 +113,10 @@ export default function DashboardPage() {
 
   // Called when analysis completes - transform API response to DealAnalysis format
   const handleAnalysisComplete = useCallback((result: AnalysisAPIResponse) => {
-    if (!result.success) {
+    // Backend returns the report dict directly - success may be undefined or missing
+    // Only bail if there is an explicit error with no usable data
+    const hasError = result.error && !result.score && !result.tenants?.length
+    if (hasError) {
       return
     }
 

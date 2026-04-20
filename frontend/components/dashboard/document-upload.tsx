@@ -45,13 +45,28 @@ interface TraceLog {
 }
 
 interface AnalysisResult {
-  success: boolean
-  deal_name: string
+  // success may be absent - backend returns report dict directly
+  success?: boolean
+  deal_name?: string
+  error?: string
+  traceback?: string
+
+  // Top-level fields (current backend output)
+  score?: number
+  tier?: string
+  rsf_recovery_sf?: number
+  rsf_recovery_annual_value?: number
+  property_appraiser_sf?: number
+  documents_processed?: number
+  tenants?: unknown[]
+  red_flags?: unknown[]
+  what_to_get_next?: Array<string | Record<string, unknown>>
+  trace_log?: Array<{ stage: string; message: string; level: string }>
+
+  // Legacy nested fields (kept for backwards compat)
   rsf_analysis?: {
-    reconciliation: {
+    reconciliation?: {
       rent_roll_rsf?: number
-      lease_rsf?: number
-      boma_rsf?: number
       discrepancy_sf?: number
       discrepancy_pct?: number
     }
@@ -59,26 +74,17 @@ interface AnalysisResult {
       sf?: number
       annual_value?: number
     }
-    discrepancy_found: boolean
+    discrepancy_found?: boolean
   }
   risk?: {
-    score: number
-    tier: string
-    red_flag_count: {
-      critical: number
-      high: number
-      moderate: number
-      low: number
-    }
+    score?: number
+    tier?: string
+    red_flag_count?: { critical: number; high: number; moderate: number; low: number }
   }
   documents?: {
-    total: number
-    by_type: Record<string, number>
-    files: Array<{ filename: string; type: string; confidence: number }>
+    total?: number
+    files?: Array<{ filename: string; type: string; confidence: number }>
   }
-  what_to_get_next?: string[]
-  error?: string
-  traceback?: string
 }
 
 interface DocumentUploadProps {
@@ -543,10 +549,11 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       {/* Analysis Results */}
       {analysisResult && (
         <div className="space-y-4">
-          {analysisResult.success ? (
+          {/* Treat as success when we have score or tenant data, even if success flag is absent */}
+          {(analysisResult.score != null || (analysisResult.tenants?.length ?? 0) > 0) ? (
             <>
-              {/* RSF Recovery Alert */}
-              {analysisResult.rsf_analysis?.discrepancy_found && (
+              {/* RSF Recovery Alert - uses top-level fields from new backend */}
+              {(analysisResult.rsf_recovery_sf ?? 0) > 0 && (
                 <Card className="border-amber-500/50 bg-amber-500/10">
                   <CardContent className="p-6">
                     <div className="flex items-start gap-4">
@@ -560,13 +567,13 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                         <p className="mt-1 text-sm text-muted-foreground">
                           Discrepancy of{' '}
                           <span className="font-semibold text-foreground">
-                            {formatNumber(analysisResult.rsf_analysis.reconciliation.discrepancy_sf || 0)} SF
+                            {formatNumber(analysisResult.rsf_recovery_sf ?? 0)} SF
                           </span>
                           {' '}detected across document sources
                         </p>
-                        {analysisResult.rsf_analysis.recovery_opportunity?.annual_value && (
+                        {(analysisResult.rsf_recovery_annual_value ?? 0) > 0 && (
                           <p className="mt-2 text-2xl font-bold text-amber-400">
-                            {formatCurrency(analysisResult.rsf_analysis.recovery_opportunity.annual_value)}
+                            {formatCurrency(analysisResult.rsf_recovery_annual_value ?? 0)}
                             <span className="ml-2 text-sm font-normal text-muted-foreground">
                               potential annual recovery
                             </span>
@@ -578,71 +585,38 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                 </Card>
               )}
 
-              {/* Document Classification Results */}
-              {analysisResult.documents && (
+              {/* Risk Summary - uses top-level score/tier from new backend */}
+              {analysisResult.score != null && (
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Document Classification</CardTitle>
-                    <CardDescription>
-                      {analysisResult.documents.total} documents auto-classified
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {analysisResult.documents.files.map((doc, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between rounded-md border border-border bg-card p-3"
-                        >
-                          <div className="flex items-center gap-3">
-                            <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                            <span className="text-sm font-medium">{doc.filename}</span>
-                          </div>
-                          <Badge variant="secondary">{doc.type}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Risk Summary */}
-              {analysisResult.risk && (
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Risk Assessment</CardTitle>
+                    <CardTitle className="text-base">Deal Score</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-6">
                       <div className="text-center">
                         <div className={cn(
                           'text-4xl font-bold',
-                          analysisResult.risk.tier === 'GREEN' && 'text-emerald-400',
-                          analysisResult.risk.tier === 'YELLOW' && 'text-yellow-400',
-                          analysisResult.risk.tier === 'ORANGE' && 'text-orange-400',
-                          analysisResult.risk.tier === 'RED' && 'text-red-400',
+                          analysisResult.tier === 'GREEN' && 'text-emerald-400',
+                          analysisResult.tier === 'YELLOW' && 'text-yellow-400',
+                          analysisResult.tier === 'ORANGE' && 'text-orange-400',
+                          analysisResult.tier === 'RED' && 'text-red-400',
                         )}>
-                          {analysisResult.risk.score}
+                          {Math.round(analysisResult.score)}
                         </div>
-                        <div className="text-xs text-muted-foreground">Deal Score</div>
+                        <div className="text-xs text-muted-foreground">/ 100</div>
                       </div>
                       <div className="flex-1 space-y-2">
-                        {analysisResult.risk.red_flag_count.critical > 0 && (
-                          <div className="flex items-center gap-2 text-red-400">
+                        <div className="text-sm font-medium text-foreground">{analysisResult.tier} Tier</div>
+                        {(analysisResult.red_flags?.length ?? 0) > 0 && (
+                          <div className="flex items-center gap-2 text-amber-400">
                             <AlertTriangle className="h-4 w-4" />
-                            <span className="text-sm">{analysisResult.risk.red_flag_count.critical} Critical Issues</span>
+                            <span className="text-sm">{analysisResult.red_flags?.length} issue{analysisResult.red_flags?.length !== 1 ? 's' : ''} flagged</span>
                           </div>
                         )}
-                        {analysisResult.risk.red_flag_count.high > 0 && (
-                          <div className="flex items-center gap-2 text-orange-400">
-                            <AlertCircle className="h-4 w-4" />
-                            <span className="text-sm">{analysisResult.risk.red_flag_count.high} High Priority</span>
-                          </div>
-                        )}
-                        {analysisResult.risk.red_flag_count.moderate > 0 && (
-                          <div className="flex items-center gap-2 text-yellow-400">
-                            <AlertCircle className="h-4 w-4" />
-                            <span className="text-sm">{analysisResult.risk.red_flag_count.moderate} Moderate</span>
+                        {(analysisResult.tenants?.length ?? 0) > 0 && (
+                          <div className="flex items-center gap-2 text-emerald-400">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span className="text-sm">{analysisResult.tenants?.length} tenant{analysisResult.tenants?.length !== 1 ? 's' : ''} extracted</span>
                           </div>
                         )}
                       </div>
@@ -652,7 +626,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
               )}
 
               {/* What to Get Next */}
-              {analysisResult.what_to_get_next && analysisResult.what_to_get_next.length > 0 && (
+              {(analysisResult.what_to_get_next?.length ?? 0) > 0 && (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Recommended Next Documents</CardTitle>
@@ -662,12 +636,12 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                   </CardHeader>
                   <CardContent>
                     <ul className="space-y-2">
-                      {analysisResult.what_to_get_next.map((item, i) => (
+                      {analysisResult.what_to_get_next!.map((item, i) => (
                         <li key={i} className="flex items-center gap-2 text-sm">
                           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                             {i + 1}
                           </span>
-                          {typeof item === 'string' ? item : JSON.stringify(item)}
+                          {typeof item === 'string' ? item : (item as Record<string, unknown>).document as string || JSON.stringify(item)}
                         </li>
                       ))}
                     </ul>
