@@ -16,6 +16,7 @@ The goal: Help Don identify properties underpaying on square footage.
 import asyncio
 import json
 import re
+import os
 import base64
 from datetime import datetime
 from typing import Any
@@ -48,10 +49,10 @@ class CREPipeline:
     
     def __init__(self, api_key: str | None = None):
         self.client = AsyncOpenAI(
-            base_url="https://ai-gateway.vercel.sh/v1",
-            api_key=api_key or "dummy",  # AI Gateway handles auth
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key or os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        self.model = "anthropic/claude-sonnet-4"
+        self.model = "anthropic/claude-3.5-sonnet"
     
     # =========================================================================
     # MAIN ENTRY POINT - Just pass files, get analysis

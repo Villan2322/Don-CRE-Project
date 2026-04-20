@@ -11,10 +11,10 @@ class BaseAgent:
         self.name = name
         self.system_prompt = system_prompt
         self.client = OpenAI(
-            base_url="https://gateway.vercel.ai/v1",
-            api_key=os.environ.get("AI_GATEWAY_API_KEY", "dummy-key"),
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        self.model = "anthropic/claude-sonnet-4-20250514"
+        self.model = "anthropic/claude-3.5-sonnet"
     
     async def analyze(self, content: str, context: Optional[dict] = None) -> dict:
         """Run analysis on the provided content."""
