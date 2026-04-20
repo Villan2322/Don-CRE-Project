@@ -170,44 +170,51 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       addTrace('STAGE_2', 'Text extraction complete', 'success')
       addTrace('STAGE_3', 'Classifying documents with AI...', 'info')
 
-      const result: AnalysisResult = await response.json()
+      const result = await response.json()
       
-      if (result.success) {
-        // Log document classifications
-        if (result.documents?.files) {
-          addTrace('STAGE_3', `Classified ${result.documents.total} document(s)`, 'success')
-          for (const doc of result.documents.files) {
-            addTrace('CLASSIFY', `${doc.filename} → ${doc.type} (${((doc.confidence || 0) * 100).toFixed(0)}% confidence)`, 'info')
-          }
+      // Use real trace_log from LangGraph backend if available
+      if (result.trace_log && Array.isArray(result.trace_log)) {
+        // Map backend trace logs to our frontend format
+        for (const log of result.trace_log) {
+          const level = log.level === 'success' ? 'success' 
+            : log.level === 'error' ? 'error'
+            : log.level === 'warning' ? 'warning'
+            : 'info'
+          addTrace(log.stage || 'PIPELINE', log.message, level, log.data)
         }
-        
-        addTrace('STAGE_4', 'Extracting structured data...', 'info')
-        addTrace('STAGE_4', 'Data extraction complete', 'success')
-        
-        addTrace('STAGE_5', 'Synthesizing cross-document analysis...', 'info')
-        addTrace('STAGE_5', 'RSF reconciliation complete', 'success')
-        
-        // Log RSF findings
-        if (result.rsf_analysis?.discrepancy_found) {
-          addTrace('RSF_ALERT', `Discrepancy found: ${result.rsf_analysis.reconciliation.discrepancy_sf?.toLocaleString()} SF`, 'warning')
-          if (result.rsf_analysis.recovery_opportunity?.annual_value) {
-            addTrace('RSF_ALERT', `Recovery opportunity: $${result.rsf_analysis.recovery_opportunity.annual_value.toLocaleString()}/year`, 'warning')
-          }
-        } else {
-          addTrace('RSF', 'No significant RSF discrepancies detected', 'success')
-        }
-        
-        // Log risk score
-        if (result.risk) {
-          addTrace('SCORE', `Deal Score: ${result.risk.score} (${result.risk.tier})`, 
-            result.risk.tier === 'GREEN' ? 'success' : result.risk.tier === 'RED' ? 'error' : 'warning')
-        }
-        
-        addTrace('COMPLETE', 'Analysis complete!', 'success')
       } else {
-        addTrace('ERROR', result.error || 'Unknown error occurred', 'error')
-        if (result.traceback) {
-          addTrace('TRACEBACK', result.traceback.slice(0, 500), 'error')
+        // Fallback: generate trace from result data
+        if (result.success) {
+          if (result.document_classifications) {
+            addTrace('CLASSIFY', `Classified ${result.documents_processed || 0} document(s)`, 'success')
+            for (const doc of result.document_classifications || []) {
+              addTrace('CLASSIFY', `${doc.filename} → ${doc.doc_type} (${((doc.confidence || 0) * 100).toFixed(0)}%)`, 'info')
+            }
+          }
+          
+          // Log RSF findings
+          if (result.rsf_recovery_sf && result.rsf_recovery_sf > 0) {
+            addTrace('RSF_ALERT', `Discrepancy found: ${result.rsf_recovery_sf?.toLocaleString()} SF`, 'warning')
+            if (result.rsf_recovery_annual_value) {
+              addTrace('RSF_ALERT', `Recovery opportunity: $${result.rsf_recovery_annual_value.toLocaleString()}/year`, 'warning')
+            }
+          } else {
+            addTrace('RSF', 'No significant RSF discrepancies detected', 'success')
+          }
+          
+          // Log risk score
+          if (result.score !== undefined) {
+            const tier = result.tier || 'UNKNOWN'
+            addTrace('SCORE', `Deal Score: ${result.score} (${tier})`, 
+              tier === 'GREEN' ? 'success' : tier === 'RED' ? 'error' : 'warning')
+          }
+          
+          addTrace('COMPLETE', 'Analysis complete!', 'success')
+        } else {
+          addTrace('ERROR', result.error || 'Unknown error occurred', 'error')
+          if (result.traceback) {
+            addTrace('TRACEBACK', result.traceback.slice(0, 500), 'error')
+          }
         }
       }
       

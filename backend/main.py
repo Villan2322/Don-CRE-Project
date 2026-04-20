@@ -14,10 +14,12 @@ from models.schemas import (
 )
 from services.document_processor import processor
 from services.pipeline import CREPipeline
+from services.langgraph_pipeline import CRELangGraphPipeline
 from config.extraction_prompts import DOC_TYPES
 
-# Initialize the collapsed 15-node pipeline
+# Initialize pipelines
 pipeline = CREPipeline()
+langgraph_pipeline = CRELangGraphPipeline()
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",
@@ -156,7 +158,8 @@ async def delete_document(document_id: str) -> dict:
 @app.post("/analyze/files")
 async def analyze_files(
     files: list[UploadFile] = File(...),
-    deal_name: Optional[str] = None
+    deal_name: Optional[str] = None,
+    use_langgraph: bool = True
 ) -> dict:
     """
     MAIN ENTRY POINT - Upload any documents and get RSF analysis.
@@ -168,7 +171,13 @@ async def analyze_files(
     4. Extracts relevant data
     5. Produces report with RSF discrepancies
     
+    Args:
+        files: Documents to analyze
+        deal_name: Optional name for this analysis
+        use_langgraph: If True, uses LangGraph pipeline with full tracing (default)
+    
     Returns analysis showing which properties may be underpaying on SF.
+    The response includes a `trace_log` array showing each pipeline step.
     """
     try:
         # Read all uploaded files
@@ -181,8 +190,12 @@ async def analyze_files(
                 "content_type": f.content_type,
             })
         
-        # Run adaptive pipeline
-        result = await pipeline.analyze(file_data, deal_name)
+        # Run pipeline (LangGraph has tracing built-in)
+        if use_langgraph:
+            result = await langgraph_pipeline.analyze(file_data, deal_name)
+        else:
+            result = await pipeline.analyze(file_data, deal_name)
+        
         return result
         
     except Exception as e:
