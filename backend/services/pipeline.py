@@ -623,10 +623,45 @@ Return as JSON with these exact top-level keys."""
                             flat_flags.append({**f, "severity": severity})
             red_flags = flat_flags
         
+        # Extract score for top-level
+        score_value = score_data.get("score", score_data.get("overall", 0))
+        if isinstance(score_value, str):
+            try:
+                score_value = float(score_value)
+            except:
+                score_value = 0
+        tier_value = self._score_to_tier(score_value)
+        
+        # Extract RSF recovery values for top-level
+        rsf_recovery_sf = recovery.get("sf", recovery.get("recoverable_sf", recovery.get("discrepancy_sf", 0))) or 0
+        rsf_recovery_value = recovery.get("annual_value", recovery.get("potential_recovery", 0)) or 0
+        if isinstance(rsf_recovery_sf, str):
+            try:
+                rsf_recovery_sf = float(rsf_recovery_sf.replace(',', ''))
+            except:
+                rsf_recovery_sf = 0
+        if isinstance(rsf_recovery_value, str):
+            try:
+                rsf_recovery_value = float(rsf_recovery_value.replace(',', '').replace('$', ''))
+            except:
+                rsf_recovery_value = 0
+        
+        # Get Property Appraiser SF baseline
+        pa_sf = getattr(self, '_property_appraiser_sf', None)
+        
         return {
             "success": True,
             "deal_name": deal_name,
             "analyzed_at": datetime.utcnow().isoformat(),
+            
+            # TOP-LEVEL FIELDS (what frontend expects)
+            "documents_processed": len(documents),
+            "property_appraiser_sf": pa_sf,
+            "score": score_value,
+            "tier": tier_value,
+            "rsf_recovery_sf": rsf_recovery_sf,
+            "rsf_recovery_annual_value": rsf_recovery_value,
+            "red_flags": red_flags,
             
             # Document summary
             "documents": {
@@ -644,15 +679,18 @@ Return as JSON with these exact top-level keys."""
             
             # RSF Analysis - THE KEY OUTPUT
             "rsf_analysis": {
-                "reconciliation": rsf_recon,
+                "reconciliation": {
+                    **rsf_recon,
+                    "property_appraiser_sf": pa_sf,
+                },
                 "recovery_opportunity": recovery,
-                "discrepancy_found": bool(rsf_recon.get("discrepancy_sf", 0)),
+                "discrepancy_found": bool(rsf_recovery_sf > 0),
             },
             
             # Risk assessment
             "risk": {
-                "score": score_data.get("score", score_data.get("overall", 0)),
-                "tier": self._score_to_tier(score_data.get("score", score_data.get("overall", 0))),
+                "score": score_value,
+                "tier": tier_value,
                 "sub_scores": score_data.get("sub_scores", {}),
                 "red_flags": red_flags,
                 "red_flag_count": {
