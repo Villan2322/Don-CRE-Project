@@ -665,8 +665,29 @@ Return ONLY the extracted text."""
         
         result = self._parse_json(response.choices[0].message.content)
         
+        # AI returns "document_type" but we use "doc_type" internally
+        # Handle both field names defensively
+        doc_type = (
+            result.get("doc_type")
+            or result.get("document_type")
+            or result.get("type")
+            or "UNKNOWN"
+        )
+        
+        # Normalize to our known types
+        doc_type = doc_type.upper().strip()
+        known_types = {
+            "LEASE", "LEASE_ABSTRACT", "RENT_ROLL", "RENT_ROLL_XLSX",
+            "BOMA", "FINANCIAL_MODEL", "CAM_RECONCILIATION",
+            "MANAGEMENT_REPORT", "COUNTY_PA"
+        }
+        if doc_type not in known_types:
+            # Try fuzzy match - e.g. "RENT ROLL" -> "RENT_ROLL"
+            doc_type_normalized = doc_type.replace(" ", "_")
+            doc_type = doc_type_normalized if doc_type_normalized in known_types else "UNKNOWN"
+        
         return {
-            "doc_type": result.get("doc_type", "UNKNOWN"),
+            "doc_type": doc_type,
             "confidence": result.get("confidence", 0.5),
             "reasoning": result.get("reasoning", ""),
         }
@@ -1008,19 +1029,22 @@ Return as JSON with these exact top-level keys."""
             return "RED"
     
     def _normalize_to_list(self, value) -> list:
-        """Ensure a value is always a list."""
+        """Ensure a value is always a list, filtering out None/null items."""
         if value is None:
             return []
         if isinstance(value, list):
-            return value
+            # Filter out None/null items - these cause frontend crashes
+            return [item for item in value if item is not None]
         if isinstance(value, dict):
             # If it's a dict with items, try to extract them
             if "tenants" in value:
                 return self._normalize_to_list(value["tenants"])
             if "items" in value:
                 return self._normalize_to_list(value["items"])
-            # Return as single-item list or extract values
-            return list(value.values()) if value else []
+            if "list" in value:
+                return self._normalize_to_list(value["list"])
+            # Return as single-item list if dict has content
+            return [value] if value else []
         return [value]
     
     def _to_deal_analysis(self, report: dict) -> DealAnalysis:

@@ -62,6 +62,8 @@ interface AnalysisAPIResponse {
     lease_end?: string
     months_remaining?: number
     risk_level?: string
+    expiry?: string        // from lease_expiry_schedule
+    months_remaining_val?: number
   }>
   lease_abstracts?: Array<{
     tenant_name?: string
@@ -133,41 +135,57 @@ export default function DashboardPage() {
       resolution: rf.resolution || rf.recommended_action || rf.recommendation || rf.action || 'Gather additional documentation',
     }))
 
-    const tenants: Tenant[] = (result.tenants || []).map((t, i) => ({
-      id: `tenant-${i}`,
-      name: t.name || t.tenant || 'Unknown Tenant',
-      suite: t.suite || '',
-      rsf: t.rsf || t.sf || 0,
-      bomaRsf: undefined,
-      rsfDelta: undefined,
-      monthlyRent: t.monthly_rent || (t.annual_rent ? t.annual_rent / 12 : 0),
-      annualRent: t.annual_rent || 0,
-      rentPSF: (t.rsf || t.sf) && t.annual_rent ? t.annual_rent / (t.rsf || t.sf || 1) : 0,
-      leaseStart: t.lease_start || '',
-      leaseExpiry: t.lease_end || null,
-      monthsRemaining: t.months_remaining ?? null,
-      incomeConcentration: 0,
-      riskLevel: (t.risk_level?.toUpperCase() || 'LOW') as 'LOW' | 'MEDIUM' | 'HIGH',
-      arStatus: 'CURRENT' as const,
-      arBalance: 0,
-    }))
+    const tenants: Tenant[] = (result.tenants || [])
+      .filter((t): t is NonNullable<typeof t> => t != null)  // Filter null items
+      .map((t, i) => {
+        // Backend synthesis returns many field name variations - handle all of them
+        const tenantName = t.name || t.tenant || t.tenant_name || t.tenantName || 'Unknown Tenant'
+        const sf = Number(t.rsf || t.sf || t.rentable_sf || t.rent_roll_rsf || 0)
+        const annualRent = Number(t.annual_rent || t.annualRent || t.base_rent_annual || 0)
+        const monthlyRent = Number(t.monthly_rent || t.monthlyRent || (annualRent ? annualRent / 12 : 0))
+        const leaseEnd = t.lease_end || t.expiry || t.lease_expiration || t.expiration || null
+        const monthsLeft = t.months_remaining != null ? Number(t.months_remaining) : null
 
-    const leaseAbstracts: LeaseAbstract[] = (result.lease_abstracts || []).map((la, i) => ({
-      id: `abstract-${i}`,
-      tenantName: la.tenant_name || 'Unknown',
-      suite: la.suite || '',
-      rsf: la.rentable_sf || 0,
-      commencementDate: la.lease_commencement || '',
-      expirationDate: la.lease_expiration || null,
-      baseRent: la.annual_base_rent || 0,
-      escalation: la.escalation || 'Unknown',
-      expenseStructure: (la.expense_structure?.toUpperCase() || 'NNN') as 'NNN' | 'GROSS' | 'MODIFIED_GROSS',
-      camCap: null,
-      renewalOptions: null,
-      tiAllowance: null,
-      remeasurementRights: false,
-      missingFields: la.missing_fields || [],
-    }))
+        return {
+          id: `tenant-${i}`,
+          name: String(tenantName),
+          suite: String(t.suite || t.unit || ''),
+          rsf: sf,
+          bomaRsf: undefined,
+          rsfDelta: undefined,
+          monthlyRent,
+          annualRent,
+          rentPSF: sf > 0 && annualRent > 0 ? annualRent / sf : 0,
+          leaseStart: String(t.lease_start || t.commencement || t.lease_commencement || ''),
+          leaseExpiry: leaseEnd,
+          monthsRemaining: monthsLeft,
+          incomeConcentration: 0,
+          riskLevel: (['LOW','MEDIUM','HIGH'].includes(String(t.risk_level || '').toUpperCase())
+            ? String(t.risk_level).toUpperCase()
+            : 'LOW') as 'LOW' | 'MEDIUM' | 'HIGH',
+          arStatus: 'CURRENT' as const,
+          arBalance: 0,
+        }
+      })
+
+    const leaseAbstracts: LeaseAbstract[] = (result.lease_abstracts || [])
+      .filter((la): la is NonNullable<typeof la> => la != null)
+      .map((la, i) => ({
+        id: `abstract-${i}`,
+        tenantName: String(la.tenant_name || la.tenant || 'Unknown'),
+        suite: String(la.suite || ''),
+        rsf: Number(la.rentable_sf || la.rsf || 0),
+        commencementDate: String(la.lease_commencement || la.commencement || ''),
+        expirationDate: la.lease_expiration || la.expiration || null,
+        baseRent: Number(la.annual_base_rent || la.base_rent_annual || 0),
+        escalation: String(la.escalation || 'Unknown'),
+        expenseStructure: (la.expense_structure?.toUpperCase() || 'NNN') as 'NNN' | 'GROSS' | 'MODIFIED_GROSS',
+        camCap: null,
+        renewalOptions: null,
+        tiAllowance: null,
+        remeasurementRights: false,
+        missingFields: Array.isArray(la.missing_fields) ? la.missing_fields : [],
+      }))
 
     const documents: UploadedDocument[] = (result.documents?.files || []).map((d, i) => ({
       id: `doc-${i}`,
@@ -178,11 +196,16 @@ export default function DashboardPage() {
       status: 'PROCESSED' as const,
     }))
 
-    // Normalize whatToGetNext to string array
-    const whatToGetNext: string[] = (result.what_to_get_next || []).map(item => {
-      if (typeof item === 'string') return item
-      return item.document || 'Unknown document'
-    })
+    // Normalize whatToGetNext to string array - filter nulls and handle all shapes
+    const whatToGetNext: string[] = (result.what_to_get_next || [])
+      .filter((item): item is NonNullable<typeof item> => item != null)
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (typeof item === 'object') {
+          return item.document || item.why_needed || JSON.stringify(item)
+        }
+        return String(item)
+      })
 
     const transformed: DealAnalysis = {
       id: crypto.randomUUID(),
