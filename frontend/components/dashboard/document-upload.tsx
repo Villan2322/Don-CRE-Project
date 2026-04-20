@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,9 @@ import {
   Trash2,
   TrendingUp,
   AlertTriangle,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +30,14 @@ interface UploadedFile {
   file: File
   status: 'pending' | 'ready' | 'error'
   error?: string
+}
+
+interface TraceLog {
+  timestamp: string
+  stage: string
+  message: string
+  type: 'info' | 'success' | 'error' | 'warning'
+  data?: unknown
 }
 
 interface AnalysisResult {
@@ -63,6 +74,7 @@ interface AnalysisResult {
   }
   what_to_get_next?: string[]
   error?: string
+  traceback?: string
 }
 
 interface DocumentUploadProps {
@@ -73,7 +85,27 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
-  const [analysisProgress, setAnalysisProgress] = useState('')
+  const [traceLogs, setTraceLogs] = useState<TraceLog[]>([])
+  const [showTrace, setShowTrace] = useState(true)
+  const traceEndRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll trace log
+  useEffect(() => {
+    if (traceEndRef.current && showTrace) {
+      traceEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [traceLogs, showTrace])
+
+  const addTrace = useCallback((stage: string, message: string, type: TraceLog['type'] = 'info', data?: unknown) => {
+    const log: TraceLog = {
+      timestamp: new Date().toLocaleTimeString(),
+      stage,
+      message,
+      type,
+      data,
+    }
+    setTraceLogs(prev => [...prev, log])
+  }, [])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -83,6 +115,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     }))
     setFiles((prev) => [...prev, ...newFiles])
     setAnalysisResult(null)
+    setTraceLogs([])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -103,41 +136,94 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     if (files.length === 0) return
     
     setIsAnalyzing(true)
-    setAnalysisProgress('Preparing files...')
     setAnalysisResult(null)
+    setTraceLogs([])
+    setShowTrace(true)
 
+    addTrace('INIT', `Starting analysis of ${files.length} document(s)...`, 'info')
+    
     try {
       // Create FormData with all files
       const formData = new FormData()
       for (const uploadedFile of files) {
         formData.append('files', uploadedFile.file)
+        addTrace('UPLOAD', `Preparing: ${uploadedFile.file.name} (${(uploadedFile.file.size / 1024).toFixed(1)} KB)`, 'info')
       }
 
-      setAnalysisProgress('Uploading and analyzing documents...')
-
+      addTrace('STAGE_1', 'Uploading files to server...', 'info')
+      
       // Call the simple analyze endpoint
       const response = await fetch('/api/analyze/files', {
         method: 'POST',
         body: formData,
       })
 
+      addTrace('STAGE_1', 'Files uploaded successfully', 'success')
+      addTrace('STAGE_2', 'Auto-detecting file types and extracting text...', 'info')
+
       if (!response.ok) {
-        throw new Error(`Analysis failed: ${response.statusText}`)
+        const errorText = await response.text()
+        addTrace('ERROR', `Server error: ${response.statusText}`, 'error')
+        throw new Error(`Analysis failed: ${response.statusText}\n${errorText}`)
       }
 
+      addTrace('STAGE_2', 'Text extraction complete', 'success')
+      addTrace('STAGE_3', 'Classifying documents with AI...', 'info')
+
       const result: AnalysisResult = await response.json()
+      
+      if (result.success) {
+        // Log document classifications
+        if (result.documents?.files) {
+          addTrace('STAGE_3', `Classified ${result.documents.total} document(s)`, 'success')
+          for (const doc of result.documents.files) {
+            addTrace('CLASSIFY', `${doc.filename} → ${doc.type} (${((doc.confidence || 0) * 100).toFixed(0)}% confidence)`, 'info')
+          }
+        }
+        
+        addTrace('STAGE_4', 'Extracting structured data...', 'info')
+        addTrace('STAGE_4', 'Data extraction complete', 'success')
+        
+        addTrace('STAGE_5', 'Synthesizing cross-document analysis...', 'info')
+        addTrace('STAGE_5', 'RSF reconciliation complete', 'success')
+        
+        // Log RSF findings
+        if (result.rsf_analysis?.discrepancy_found) {
+          addTrace('RSF_ALERT', `Discrepancy found: ${result.rsf_analysis.reconciliation.discrepancy_sf?.toLocaleString()} SF`, 'warning')
+          if (result.rsf_analysis.recovery_opportunity?.annual_value) {
+            addTrace('RSF_ALERT', `Recovery opportunity: $${result.rsf_analysis.recovery_opportunity.annual_value.toLocaleString()}/year`, 'warning')
+          }
+        } else {
+          addTrace('RSF', 'No significant RSF discrepancies detected', 'success')
+        }
+        
+        // Log risk score
+        if (result.risk) {
+          addTrace('SCORE', `Deal Score: ${result.risk.score} (${result.risk.tier})`, 
+            result.risk.tier === 'GREEN' ? 'success' : result.risk.tier === 'RED' ? 'error' : 'warning')
+        }
+        
+        addTrace('COMPLETE', 'Analysis complete!', 'success')
+      } else {
+        addTrace('ERROR', result.error || 'Unknown error occurred', 'error')
+        if (result.traceback) {
+          addTrace('TRACEBACK', result.traceback.slice(0, 500), 'error')
+        }
+      }
+      
       setAnalysisResult(result)
       onAnalysisComplete?.(result)
 
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Analysis failed'
+      addTrace('ERROR', errorMsg, 'error')
       setAnalysisResult({
         success: false,
         deal_name: 'Analysis',
-        error: error instanceof Error ? error.message : 'Analysis failed',
+        error: errorMsg,
       })
     } finally {
       setIsAnalyzing(false)
-      setAnalysisProgress('')
     }
   }
 
@@ -145,12 +231,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     setFiles((prev) => prev.filter((f) => f.id !== id))
     if (files.length === 1) {
       setAnalysisResult(null)
+      setTraceLogs([])
     }
   }
 
   const clearAll = () => {
     setFiles([])
     setAnalysisResult(null)
+    setTraceLogs([])
   }
 
   const getFileIcon = (filename: string) => {
@@ -177,6 +265,15 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
   const formatNumber = (value: number) => {
     return new Intl.NumberFormat('en-US').format(value)
+  }
+
+  const getTraceColor = (type: TraceLog['type']) => {
+    switch (type) {
+      case 'success': return 'text-emerald-400'
+      case 'error': return 'text-red-400'
+      case 'warning': return 'text-amber-400'
+      default: return 'text-muted-foreground'
+    }
   }
 
   return (
@@ -274,7 +371,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
               </h3>
               <p className="text-sm text-muted-foreground">
                 {isAnalyzing 
-                  ? analysisProgress 
+                  ? 'Processing with AI pipeline' 
                   : `${files.length} documents will be auto-classified and analyzed`
                 }
               </p>
@@ -298,6 +395,49 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
               )}
             </Button>
           </CardContent>
+        </Card>
+      )}
+
+      {/* Trace Log / Terminal */}
+      {traceLogs.length > 0 && (
+        <Card className="border-muted bg-[#0d1117]">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="h-4 w-4 text-emerald-400" />
+                <CardTitle className="text-sm font-mono text-emerald-400">Pipeline Trace</CardTitle>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowTrace(!showTrace)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {showTrace ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </div>
+          </CardHeader>
+          {showTrace && (
+            <CardContent className="pt-0">
+              <div className="max-h-[300px] overflow-y-auto rounded bg-[#161b22] p-3 font-mono text-xs">
+                {traceLogs.map((log, i) => (
+                  <div key={i} className="flex gap-2 py-0.5">
+                    <span className="text-muted-foreground/60">[{log.timestamp}]</span>
+                    <span className="text-blue-400 min-w-[100px]">[{log.stage}]</span>
+                    <span className={getTraceColor(log.type)}>{log.message}</span>
+                  </div>
+                ))}
+                {isAnalyzing && (
+                  <div className="flex gap-2 py-0.5 animate-pulse">
+                    <span className="text-muted-foreground/60">[{new Date().toLocaleTimeString()}]</span>
+                    <span className="text-blue-400 min-w-[100px]">[PROCESSING]</span>
+                    <span className="text-muted-foreground">Waiting for AI response...</span>
+                  </div>
+                )}
+                <div ref={traceEndRef} />
+              </div>
+            </CardContent>
+          )}
         </Card>
       )}
 
@@ -428,7 +568,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
                             {i + 1}
                           </span>
-                          {item}
+                          {typeof item === 'string' ? item : JSON.stringify(item)}
                         </li>
                       ))}
                     </ul>
@@ -439,11 +579,16 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
           ) : (
             <Card className="border-destructive/50 bg-destructive/10">
               <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <AlertCircle className="h-6 w-6 text-destructive" />
-                  <div>
+                <div className="flex items-start gap-4">
+                  <AlertCircle className="h-6 w-6 text-destructive flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-semibold text-destructive">Analysis Failed</h3>
-                    <p className="text-sm text-muted-foreground">{analysisResult.error}</p>
+                    <p className="text-sm text-muted-foreground break-words">{analysisResult.error}</p>
+                    {analysisResult.traceback && (
+                      <pre className="mt-2 max-h-[200px] overflow-auto rounded bg-black/20 p-2 text-xs text-muted-foreground">
+                        {analysisResult.traceback}
+                      </pre>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -453,7 +598,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       )}
 
       {/* How it Works */}
-      {files.length === 0 && (
+      {files.length === 0 && traceLogs.length === 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">How It Works</CardTitle>

@@ -568,14 +568,18 @@ Return as JSON with these exact top-level keys."""
                 },
             },
             
-            # Tenants
-            "tenants": synthesis.get("TENANT_ANALYSIS", synthesis.get("tenant_analysis", [])),
+            # Tenants - ensure it's always a list
+            "tenants": self._normalize_to_list(
+                synthesis.get("TENANT_ANALYSIS", synthesis.get("tenant_analysis", []))
+            ),
             
             # Financial
             "financial": synthesis.get("FINANCIAL_SUMMARY", synthesis.get("financial_summary", {})),
             
-            # Next steps
-            "what_to_get_next": synthesis.get("WHAT_TO_GET_NEXT", synthesis.get("what_to_get_next", [])),
+            # Next steps - ensure it's always a list
+            "what_to_get_next": self._normalize_to_list(
+                synthesis.get("WHAT_TO_GET_NEXT", synthesis.get("what_to_get_next", []))
+            ),
             
             # Full synthesis for reference
             "_raw_synthesis": synthesis,
@@ -597,6 +601,22 @@ Return as JSON with these exact top-level keys."""
             return "ORANGE"
         else:
             return "RED"
+    
+    def _normalize_to_list(self, value) -> list:
+        """Ensure a value is always a list."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            # If it's a dict with items, try to extract them
+            if "tenants" in value:
+                return self._normalize_to_list(value["tenants"])
+            if "items" in value:
+                return self._normalize_to_list(value["items"])
+            # Return as single-item list or extract values
+            return list(value.values()) if value else []
+        return [value]
     
     def _to_deal_analysis(self, report: dict) -> DealAnalysis:
         """Convert report dict to DealAnalysis model."""
