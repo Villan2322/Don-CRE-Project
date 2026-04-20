@@ -14,12 +14,10 @@ from models.schemas import (
 )
 from services.document_processor import processor
 from services.pipeline import CREPipeline
-from services.langgraph_pipeline import CRELangGraphPipeline
 from config.extraction_prompts import DOC_TYPES
 
-# Initialize pipelines
+# Initialize pipeline
 pipeline = CREPipeline()
-langgraph_pipeline = CRELangGraphPipeline()
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",
@@ -160,7 +158,6 @@ async def analyze_files(
     files: list[UploadFile] = File(...),
     deal_name: Annotated[Optional[str], Form()] = None,
     property_appraiser_sf: Annotated[Optional[str], Form()] = None,
-    use_langgraph: bool = True
 ) -> dict:
     """
     MAIN ENTRY POINT - Upload any documents and get RSF analysis.
@@ -177,7 +174,6 @@ async def analyze_files(
         files: Documents to analyze
         deal_name: Optional name for this analysis
         property_appraiser_sf: Official SF from County Property Appraiser (the baseline for comparison)
-        use_langgraph: If True, uses LangGraph pipeline with full tracing (default)
     
     Returns analysis showing which properties may be underpaying on SF.
     The response includes a `trace_log` array showing each pipeline step.
@@ -201,11 +197,8 @@ async def analyze_files(
             except ValueError:
                 pass
         
-        # Run pipeline (LangGraph has tracing built-in)
-        if use_langgraph:
-            result = await langgraph_pipeline.analyze(file_data, deal_name, pa_sf)
-        else:
-            result = await pipeline.analyze(file_data, deal_name, pa_sf)
+        # Run pipeline with built-in tracing
+        result = await pipeline.analyze(file_data, deal_name, pa_sf)
         
         return result
         

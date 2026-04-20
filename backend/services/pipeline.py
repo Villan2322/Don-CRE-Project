@@ -40,6 +40,28 @@ from models.schemas import (
 )
 
 
+class PipelineTracer:
+    """Simple tracing for pipeline execution."""
+    
+    def __init__(self):
+        self.logs = []
+    
+    def log(self, stage: str, message: str, level: str = "info", data: dict = None):
+        """Add a trace log entry."""
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "stage": stage,
+            "message": message,
+            "level": level,  # info, success, warning, error
+        }
+        if data:
+            entry["data"] = data
+        self.logs.append(entry)
+    
+    def get_logs(self) -> list[dict]:
+        return self.logs
+
+
 class CREPipeline:
     """
     Adaptive CRE Document Intelligence Pipeline.
@@ -53,6 +75,7 @@ class CREPipeline:
             api_key=api_key or os.environ.get("OPENROUTER_API_KEY", ""),
         )
         self.model = "anthropic/claude-sonnet-4"
+        self.tracer = None  # Created fresh for each analysis run
     
     # =========================================================================
     # MAIN ENTRY POINT - Just pass files, get analysis
@@ -76,31 +99,75 @@ class CREPipeline:
         if not deal_name:
             deal_name = f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        # Initialize tracer for this run
+        self.tracer = PipelineTracer()
+        self.tracer.log("START", f"Beginning analysis: {deal_name}", "info", {
+            "file_count": len(files),
+            "filenames": [f.get("filename", "unknown") for f in files],
+        })
+        
         # Store PA SF for synthesis stage
         self._property_appraiser_sf = property_appraiser_sf
+        if property_appraiser_sf:
+            self.tracer.log("BASELINE", f"Property Appraiser SF: {property_appraiser_sf:,.0f} SF (official baseline)", "info")
+        else:
+            self.tracer.log("BASELINE", "No Property Appraiser SF provided - will compare across documents only", "warning")
         
         # Stage 1: Ingest and prepare all files
+        self.tracer.log("STAGE_1", "Ingesting files and extracting text...", "info")
         documents = await self._ingest_files(files)
         
         if not documents:
+            self.tracer.log("ERROR", "No processable documents found", "error")
             return {
                 "success": False,
                 "deal_name": deal_name,
                 "error": "No processable documents found",
                 "documents_received": len(files),
+                "trace_log": self.tracer.get_logs(),
             }
         
+        self.tracer.log("STAGE_1", f"Ingested {len(documents)} document(s)", "success")
+        
         # Stage 2: Classify each document
+        self.tracer.log("STAGE_2", "Classifying documents with AI...", "info")
         classified = await self._classify_all(documents)
+        for doc in classified:
+            self.tracer.log("CLASSIFY", f"{doc.get('filename', 'unknown')} -> {doc.get('doc_type', 'UNKNOWN')} ({doc.get('confidence', 0)*100:.0f}%)", "info")
+        self.tracer.log("STAGE_2", f"Classified {len(classified)} document(s)", "success")
         
         # Stage 3: Extract data from each document
+        self.tracer.log("STAGE_3", "Extracting structured data from documents...", "info")
         extracted = await self._extract_all(classified)
+        self.tracer.log("STAGE_3", f"Extracted data from {len(extracted)} document(s)", "success")
         
         # Stage 4: Synthesize cross-document analysis (uses PA SF as baseline)
+        self.tracer.log("STAGE_4", "Synthesizing cross-document analysis...", "info")
         synthesis = await self._synthesize(deal_name, extracted)
+        self.tracer.log("STAGE_4", "Synthesis complete", "success")
         
         # Stage 5: Build final report
+        self.tracer.log("STAGE_5", "Building final report...", "info")
         report = self._build_report(deal_name, extracted, synthesis)
+        
+        # Add RSF finding to trace
+        if report.get("rsf_recovery_sf", 0) > 0:
+            self.tracer.log("RSF_ALERT", f"Discrepancy found: {report['rsf_recovery_sf']:,.0f} SF", "warning")
+            if report.get("rsf_recovery_annual_value", 0) > 0:
+                self.tracer.log("RSF_ALERT", f"Recovery opportunity: ${report['rsf_recovery_annual_value']:,.0f}/year", "warning")
+        else:
+            self.tracer.log("RSF", "No significant RSF discrepancies detected", "success")
+        
+        # Add score to trace
+        score = report.get("score", 0)
+        tier = report.get("tier", "UNKNOWN")
+        level = "success" if tier == "GREEN" else "error" if tier == "RED" else "warning"
+        self.tracer.log("SCORE", f"Deal Score: {score} ({tier})", level)
+        
+        self.tracer.log("COMPLETE", "Analysis complete!", "success")
+        
+        # Include trace log in response
+        report["trace_log"] = self.tracer.get_logs()
         
         return report
     
