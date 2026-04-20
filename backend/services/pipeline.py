@@ -285,42 +285,51 @@ class CREPipeline:
         # Method 2: Use OpenRouter's native PDF parsing (supports scanned documents)
         ocr_text = await self._parse_pdf_with_openrouter(content, filename)
         
-        if ocr_text and "[PDF parsing error" not in ocr_text and len(ocr_text.strip()) > 50:
+        ocr_is_error = not ocr_text or "[PDF parsing error" in ocr_text or "[PDF OCR" in ocr_text
+        
+        if not ocr_is_error and len(ocr_text.strip()) > 50:
             doc["extraction_method"] = "pdf_ai_ocr"
             if self.tracer:
                 self.tracer.log("INGEST", f"  -> AI PDF parsing: {len(ocr_text):,} chars extracted", "success")
             return ocr_text, True
         
-        if ocr_text and "[PDF parsing error" in ocr_text:
-            doc["extraction_errors"].append(ocr_text)
+        if ocr_is_error:
+            error_detail = ocr_text[:300] if ocr_text else "no response"
+            doc["extraction_errors"].append(f"AI PDF parsing failed: {error_detail}")
+            if self.tracer:
+                self.tracer.log("INGEST", f"  -> AI PDF parsing failed: {error_detail[:120]}", "error")
         
-        # Method 3: Combine whatever we got
-        combined = ""
-        if text and len(text.strip()) > 20:
-            combined = text.strip()
-        if ocr_text and len(ocr_text.strip()) > 20 and "[PDF parsing error" not in ocr_text:
-            combined = (combined + "\n\n" + ocr_text.strip()) if combined else ocr_text.strip()
+        # Method 3: Combine PyPDF2 text + OCR text if both got something real
+        # Only use content that is NOT an error string
+        real_text = text.strip() if (text and len(text.strip()) > 20 and "[PDF extraction error" not in text) else ""
+        real_ocr = ocr_text.strip() if (not ocr_is_error and ocr_text and len(ocr_text.strip()) > 20) else ""
+        
+        combined = "\n\n".join(filter(None, [real_text, real_ocr]))
         
         if combined and len(combined.strip()) > 50:
             doc["extraction_method"] = "pdf_combined"
+            if self.tracer:
+                self.tracer.log("INGEST", f"  -> Combined extraction: {len(combined):,} chars", "info")
             return combined, True
         
-        # All methods failed - provide helpful message
+        # Method 4 (last resort): If PyPDF2 got ANYTHING, pass it to the AI anyway.
+        # The AI can often extract structure from even sparse/garbled PDF text.
+        if text and len(text.strip()) > 10 and "[PDF extraction error" not in text:
+            doc["extraction_method"] = "pdf_raw_fallback"
+            if self.tracer:
+                self.tracer.log("INGEST", f"  -> Using raw PDF text ({len(text.strip())} chars) for AI extraction", "warning")
+            return text, True
+
+        # All methods failed - pass an error description so the AI can still respond usefully
         doc["extraction_method"] = "pdf_failed"
-        doc["extraction_errors"].append(f"Could not extract text from PDF - tried PyPDF2 and AI parsing")
-        error_msg = f"""[PDF EXTRACTION FAILED for {filename}]
-
-Unable to extract readable text from this PDF using multiple methods.
-
-Errors encountered:
-{chr(10).join(doc['extraction_errors'])}
-
-RECOMMENDATION: Please provide one of:
-1. A text-based PDF (where you can select/copy text)
-2. An Excel rent roll export  
-3. A clearer scan of the document
-
-Property Appraiser SF baseline: {getattr(self, '_property_appraiser_sf', 'N/A')} SF"""
+        errors_joined = chr(10).join(doc["extraction_errors"])
+        pa_sf = getattr(self, '_property_appraiser_sf', 'N/A')
+        error_msg = f"""[PDF EXTRACTION FAILED: {filename}]
+Errors: {errors_joined}
+Property Appraiser SF baseline recorded: {pa_sf} SF
+Action: Provide a text-based PDF, Excel export, or clearer scan."""
+        if self.tracer:
+            self.tracer.log("INGEST", f"  -> All extraction methods failed for {filename}", "error")
         return error_msg, True
     
     async def _parse_pdf_with_openrouter(self, content: bytes | str, filename: str) -> str:
@@ -916,28 +925,53 @@ Return as JSON with these exact top-level keys."""
                             flat_flags.append({**f, "severity": severity})
             red_flags = flat_flags
         
-        # Extract score for top-level
-        score_value = score_data.get("score", score_data.get("overall", 0))
+        # Extract score - AI returns 'overall_score', 'score', or 'overall'
+        score_value = (
+            score_data.get("overall_score")
+            or score_data.get("score")
+            or score_data.get("overall")
+            or score_data.get("total_score")
+            or 0
+        )
         if isinstance(score_value, str):
             try:
-                score_value = float(score_value)
+                score_value = float(score_value.replace(',', ''))
             except:
                 score_value = 0
-        tier_value = self._score_to_tier(score_value)
+        score_value = float(score_value)
         
-        # Extract RSF recovery values for top-level
-        rsf_recovery_sf = recovery.get("sf", recovery.get("recoverable_sf", recovery.get("discrepancy_sf", 0))) or 0
-        rsf_recovery_value = recovery.get("annual_value", recovery.get("potential_recovery", 0)) or 0
-        if isinstance(rsf_recovery_sf, str):
-            try:
-                rsf_recovery_sf = float(rsf_recovery_sf.replace(',', ''))
-            except:
-                rsf_recovery_sf = 0
-        if isinstance(rsf_recovery_value, str):
-            try:
-                rsf_recovery_value = float(rsf_recovery_value.replace(',', '').replace('$', ''))
-            except:
-                rsf_recovery_value = 0
+        # Use AI-provided tier if available, otherwise derive it
+        ai_tier = score_data.get("tier", "")
+        tier_value = self._score_to_tier(score_value) if not ai_tier else self._normalize_tier(ai_tier)
+        
+        # Extract RSF recovery - AI returns 'recoverable_sf' and 'estimated_annual_recovery'
+        rsf_recovery_sf = (
+            recovery.get("recoverable_sf")
+            or recovery.get("sf")
+            or recovery.get("discrepancy_sf")
+            or recovery.get("opportunity_sf")
+            or 0
+        ) or 0
+        rsf_recovery_value = (
+            recovery.get("estimated_annual_recovery")
+            or recovery.get("annual_value")
+            or recovery.get("potential_recovery")
+            or recovery.get("estimated_recovery")
+            or 0
+        ) or 0
+        
+        def _safe_float(v) -> float:
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str):
+                try:
+                    return float(v.replace(',', '').replace('$', '').strip())
+                except:
+                    return 0.0
+            return 0.0
+        
+        rsf_recovery_sf = _safe_float(rsf_recovery_sf)
+        rsf_recovery_value = _safe_float(rsf_recovery_value)
         
         # Get Property Appraiser SF baseline
         pa_sf = getattr(self, '_property_appraiser_sf', None)
@@ -994,23 +1028,69 @@ Return as JSON with these exact top-level keys."""
                 },
             },
             
-            # Tenants - ensure it's always a list
-            "tenants": self._normalize_to_list(
-                synthesis.get("TENANT_ANALYSIS", synthesis.get("tenant_analysis", []))
+            # Tenants - try all key variants the AI might return
+            "tenants": self._extract_tenants(synthesis),
+            
+            # Financial - try all key variants
+            "financial": (
+                synthesis.get("FINANCIAL_SUMMARY")
+                or synthesis.get("financial_summary")
+                or synthesis.get("financial_analysis")
+                or {}
             ),
             
-            # Financial
-            "financial": synthesis.get("FINANCIAL_SUMMARY", synthesis.get("financial_summary", {})),
-            
-            # Next steps - ensure it's always a list
+            # Next steps - ensure it's always a list, try all key variants
             "what_to_get_next": self._normalize_to_list(
-                synthesis.get("WHAT_TO_GET_NEXT", synthesis.get("what_to_get_next", []))
+                synthesis.get("WHAT_TO_GET_NEXT")
+                or synthesis.get("what_to_get_next")
+                or synthesis.get("missing_documents")
+                or []
             ),
             
             # Full synthesis for reference
             "_raw_synthesis": synthesis,
         }
     
+    def _extract_tenants(self, synthesis: dict) -> list:
+        """
+        Extract tenants from synthesis, trying every key the AI might use.
+        The AI sometimes puts tenants in TENANT_ANALYSIS, rent_verification.tenants,
+        lease_audit.tenants, or similar nested locations.
+        """
+        print(f"[PIPELINE] _extract_tenants synthesis keys: {list(synthesis.keys())}", flush=True)
+        rv_debug = synthesis.get("rent_verification") or {}
+        print(f"[PIPELINE] rent_verification keys: {list(rv_debug.keys()) if isinstance(rv_debug, dict) else type(rv_debug)}", flush=True)
+        print(f"[PIPELINE] rent_verification snippet: {str(rv_debug)[:400]}", flush=True)
+        # Try direct tenant keys
+        for key in ["TENANT_ANALYSIS", "tenant_analysis", "tenants", "TENANTS", "tenant_roster"]:
+            val = synthesis.get(key)
+            if val:
+                result = self._normalize_to_list(val)
+                if result:
+                    return result
+
+        # Try nested inside rent_verification
+        rv = synthesis.get("rent_verification") or synthesis.get("RENT_VERIFICATION") or {}
+        if isinstance(rv, dict):
+            for key in ["tenants", "tenant_list", "rent_roll", "tenant_analysis"]:
+                val = rv.get(key)
+                if val:
+                    result = self._normalize_to_list(val)
+                    if result:
+                        return result
+
+        # Try nested inside lease_audit
+        la = synthesis.get("lease_audit") or synthesis.get("LEASE_AUDIT") or {}
+        if isinstance(la, dict):
+            for key in ["tenants", "abstracts", "leases"]:
+                val = la.get(key)
+                if val:
+                    result = self._normalize_to_list(val)
+                    if result:
+                        return result
+
+        return []
+
     def _count_by_type(self, documents: list[dict]) -> dict:
         counts = {}
         for doc in documents:
@@ -1027,6 +1107,17 @@ Return as JSON with these exact top-level keys."""
             return "ORANGE"
         else:
             return "RED"
+
+    def _normalize_tier(self, tier_str: str) -> str:
+        """Normalize AI-returned tier strings to GREEN/YELLOW/ORANGE/RED."""
+        t = str(tier_str).upper().strip()
+        mapping = {
+            "GREEN": "GREEN", "PASS": "GREEN", "LOW RISK": "GREEN",
+            "YELLOW": "YELLOW", "CAUTION": "YELLOW", "UNDER REVIEW": "YELLOW", "MODERATE RISK": "YELLOW",
+            "ORANGE": "ORANGE", "HIGH RISK": "ORANGE", "ELEVATED": "ORANGE",
+            "RED": "RED", "CRITICAL": "RED", "FAIL": "RED", "VERY HIGH RISK": "RED",
+        }
+        return mapping.get(t, self._score_to_tier(0))
     
     def _normalize_to_list(self, value) -> list:
         """Ensure a value is always a list, filtering out None/null items."""
