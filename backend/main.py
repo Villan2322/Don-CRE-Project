@@ -153,27 +153,57 @@ async def delete_document(document_id: str) -> dict:
     return {"message": "Document deleted", "document_id": document_id}
 
 
+@app.post("/analyze/files")
+async def analyze_files(
+    files: list[UploadFile] = File(...),
+    deal_name: Optional[str] = None
+) -> dict:
+    """
+    MAIN ENTRY POINT - Upload any documents and get RSF analysis.
+    
+    Just upload files - the system figures out everything:
+    1. Auto-detects file type (PDF, Excel, image)
+    2. Auto-determines if OCR is needed
+    3. Auto-classifies document type
+    4. Extracts relevant data
+    5. Produces report with RSF discrepancies
+    
+    Returns analysis showing which properties may be underpaying on SF.
+    """
+    try:
+        # Read all uploaded files
+        file_data = []
+        for f in files:
+            content = await f.read()
+            file_data.append({
+                "filename": f.filename,
+                "content": content,
+                "content_type": f.content_type,
+            })
+        
+        # Run adaptive pipeline
+        result = await pipeline.analyze(file_data, deal_name)
+        return result
+        
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+
 @app.post("/pipeline/run")
 async def run_pipeline(deal_name: str, documents: list[dict]) -> dict:
     """
-    Run the full 6-stage collapsed pipeline on a document package.
+    Legacy endpoint - Run the pipeline with pre-extracted document content.
     
-    This is the main entry point that replaces the 76-node n8n workflow.
-    
-    Args:
-        deal_name: Name of the deal being analyzed
-        documents: List of {filename, content, file_type} dicts
-        
-    Returns:
-        Complete DealAnalysis with scores, flags, and recommendations
+    For most use cases, use POST /analyze/files instead.
     """
     try:
-        result = await pipeline.run(deal_name, documents)
-        return {
-            "success": True,
-            "deal_name": deal_name,
-            "analysis": result.model_dump() if hasattr(result, 'model_dump') else result.__dict__,
-        }
+        result = await pipeline.analyze(documents, deal_name)
+        return result
     except Exception as e:
         import traceback
         return {

@@ -11,41 +11,78 @@ import {
   Upload,
   FileText,
   FileSpreadsheet,
+  Image as ImageIcon,
   CheckCircle2,
   AlertCircle,
   X,
   Play,
   Trash2,
+  TrendingUp,
+  AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface UploadedFile {
   id: string
   file: File
-  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
-  progress: number
-  documentType?: string
+  status: 'pending' | 'ready' | 'error'
+  error?: string
+}
+
+interface AnalysisResult {
+  success: boolean
+  deal_name: string
+  rsf_analysis?: {
+    reconciliation: {
+      rent_roll_rsf?: number
+      lease_rsf?: number
+      boma_rsf?: number
+      discrepancy_sf?: number
+      discrepancy_pct?: number
+    }
+    recovery_opportunity?: {
+      sf?: number
+      annual_value?: number
+    }
+    discrepancy_found: boolean
+  }
+  risk?: {
+    score: number
+    tier: string
+    red_flag_count: {
+      critical: number
+      high: number
+      moderate: number
+      low: number
+    }
+  }
+  documents?: {
+    total: number
+    by_type: Record<string, number>
+    files: Array<{ filename: string; type: string; confidence: number }>
+  }
+  what_to_get_next?: string[]
   error?: string
 }
 
 interface DocumentUploadProps {
-  onAnalysisStart?: (documentIds: string[]) => void
+  onAnalysisComplete?: (result: AnalysisResult) => void
 }
 
-export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
+export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
+  const [analysisProgress, setAnalysisProgress] = useState('')
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
       id: crypto.randomUUID(),
       file,
-      status: 'pending' as const,
-      progress: 0,
+      status: 'ready' as const,
     }))
     setFiles((prev) => [...prev, ...newFiles])
-    setAnalysisComplete(false)
+    setAnalysisResult(null)
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -55,118 +92,99 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls'],
       'text/csv': ['.csv'],
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/tiff': ['.tiff', '.tif'],
     },
     multiple: true,
   })
 
-  const uploadFile = async (uploadedFile: UploadedFile) => {
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.id === uploadedFile.id ? { ...f, status: 'uploading' as const, progress: 0 } : f
-      )
-    )
+  const runAnalysis = async () => {
+    if (files.length === 0) return
+    
+    setIsAnalyzing(true)
+    setAnalysisProgress('Preparing files...')
+    setAnalysisResult(null)
 
     try {
+      // Create FormData with all files
       const formData = new FormData()
-      formData.append('file', uploadedFile.file)
+      for (const uploadedFile of files) {
+        formData.append('files', uploadedFile.file)
+      }
 
-      const response = await fetch('/api/documents/upload', {
+      setAnalysisProgress('Uploading and analyzing documents...')
+
+      // Call the simple analyze endpoint
+      const response = await fetch('/api/analyze/files', {
         method: 'POST',
         body: formData,
       })
 
       if (!response.ok) {
-        throw new Error('Upload failed')
+        throw new Error(`Analysis failed: ${response.statusText}`)
       }
 
-      const result = await response.json()
+      const result: AnalysisResult = await response.json()
+      setAnalysisResult(result)
+      onAnalysisComplete?.(result)
 
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === uploadedFile.id
-            ? {
-                ...f,
-                status: 'completed' as const,
-                progress: 100,
-                documentType: result.message?.split('classified as ')[1] || 'Unknown',
-              }
-            : f
-        )
-      )
     } catch (error) {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === uploadedFile.id
-            ? { ...f, status: 'error' as const, error: 'Upload failed' }
-            : f
-        )
-      )
+      setAnalysisResult({
+        success: false,
+        deal_name: 'Analysis',
+        error: error instanceof Error ? error.message : 'Analysis failed',
+      })
+    } finally {
+      setIsAnalyzing(false)
+      setAnalysisProgress('')
     }
-  }
-
-  const uploadAllFiles = async () => {
-    const pendingFiles = files.filter((f) => f.status === 'pending')
-    for (const file of pendingFiles) {
-      await uploadFile(file)
-    }
-  }
-
-  const runAnalysis = async () => {
-    setIsAnalyzing(true)
-    
-    // Simulate analysis for demo (in production, call /api/analyze)
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    
-    setIsAnalyzing(false)
-    setAnalysisComplete(true)
-    
-    const documentIds = files.filter((f) => f.status === 'completed').map((f) => f.id)
-    onAnalysisStart?.(documentIds)
   }
 
   const removeFile = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id))
+    if (files.length === 1) {
+      setAnalysisResult(null)
+    }
   }
 
   const clearAll = () => {
     setFiles([])
-    setAnalysisComplete(false)
+    setAnalysisResult(null)
   }
 
   const getFileIcon = (filename: string) => {
-    if (filename.endsWith('.pdf')) {
+    const ext = filename.split('.').pop()?.toLowerCase()
+    if (ext === 'pdf') {
       return <FileText className="h-5 w-5 text-red-400" />
     }
-    if (filename.endsWith('.xlsx') || filename.endsWith('.xls') || filename.endsWith('.csv')) {
+    if (['xlsx', 'xls', 'csv'].includes(ext || '')) {
       return <FileSpreadsheet className="h-5 w-5 text-green-400" />
+    }
+    if (['png', 'jpg', 'jpeg', 'tiff', 'tif'].includes(ext || '')) {
+      return <ImageIcon className="h-5 w-5 text-blue-400" />
     }
     return <FileText className="h-5 w-5 text-muted-foreground" />
   }
 
-  const getStatusBadge = (status: UploadedFile['status']) => {
-    switch (status) {
-      case 'pending':
-        return <Badge variant="secondary">Pending</Badge>
-      case 'uploading':
-        return <Badge variant="secondary" className="bg-blue-500/20 text-blue-400">Uploading</Badge>
-      case 'processing':
-        return <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-400">Processing</Badge>
-      case 'completed':
-        return <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-400">Ready</Badge>
-      case 'error':
-        return <Badge variant="destructive">Error</Badge>
-    }
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(value)
   }
 
-  const completedCount = files.filter((f) => f.status === 'completed').length
-  const pendingCount = files.filter((f) => f.status === 'pending').length
+  const formatNumber = (value: number) => {
+    return new Intl.NumberFormat('en-US').format(value)
+  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-foreground">Document Upload</h2>
+        <h2 className="text-2xl font-semibold text-foreground">Document Analysis</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Upload your CRE documents for AI-powered analysis
+          Upload any CRE documents - the system auto-detects type and extracts data
         </p>
       </div>
 
@@ -187,56 +205,14 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
               <Upload className="h-8 w-8 text-primary" />
             </div>
             <p className="text-lg font-medium text-foreground">
-              {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
+              {isDragActive ? 'Drop files here' : 'Drop any CRE documents here'}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              or click to browse your computer
+              Rent rolls, leases, BOMA measurements, financial reports - any format
             </p>
             <p className="mt-4 text-xs text-muted-foreground">
-              Supported formats: PDF, XLSX, XLS, CSV
+              PDF, Excel, CSV, and scanned images supported (auto-OCR)
             </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Expected Documents Guide */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Expected Documents</CardTitle>
-          <CardDescription>
-            For complete analysis, upload the following document types
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              { name: 'Rent Roll', format: 'XLSX', required: true },
-              { name: 'Executed Leases', format: 'PDF', required: true },
-              { name: 'BOMA Measurement', format: 'PDF', required: true },
-              { name: 'Operating Statements', format: 'PDF/XLSX', required: true },
-              { name: 'AR Aging Report', format: 'XLSX', required: false },
-              { name: 'CAM Reconciliation', format: 'PDF/XLSX', required: false },
-            ].map((doc) => (
-              <div
-                key={doc.name}
-                className="flex items-center gap-3 rounded-md border border-border bg-card p-3"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
-                  {doc.format.includes('XLSX') ? (
-                    <FileSpreadsheet className="h-4 w-4 text-green-400" />
-                  ) : (
-                    <FileText className="h-4 w-4 text-red-400" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
-                  <p className="text-xs text-muted-foreground">{doc.format}</p>
-                </div>
-                {doc.required && (
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                )}
-              </div>
-            ))}
           </div>
         </CardContent>
       </Card>
@@ -247,23 +223,15 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-base">Uploaded Files</CardTitle>
+                <CardTitle className="text-base">Files to Analyze</CardTitle>
                 <CardDescription>
-                  {completedCount} of {files.length} files ready
+                  {files.length} file{files.length !== 1 ? 's' : ''} ready
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
-                {pendingCount > 0 && (
-                  <Button size="sm" variant="outline" onClick={uploadAllFiles}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload All ({pendingCount})
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={clearAll}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Clear
-                </Button>
-              </div>
+              <Button size="sm" variant="ghost" onClick={clearAll}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Clear All
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -275,48 +243,20 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
                 >
                   {getFileIcon(uploadedFile.file.name)}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {uploadedFile.file.name}
-                      </p>
-                      {getStatusBadge(uploadedFile.status)}
-                    </div>
-                    {uploadedFile.status === 'uploading' && (
-                      <Progress value={uploadedFile.progress} className="mt-2 h-1" />
-                    )}
-                    {uploadedFile.documentType && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Classified as: {uploadedFile.documentType}
-                      </p>
-                    )}
-                    {uploadedFile.error && (
-                      <p className="mt-1 text-xs text-destructive">{uploadedFile.error}</p>
-                    )}
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {uploadedFile.file.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {(uploadedFile.file.size / 1024).toFixed(1)} KB
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {uploadedFile.status === 'pending' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => uploadFile(uploadedFile)}
-                      >
-                        <Upload className="h-4 w-4" />
-                      </Button>
-                    )}
-                    {uploadedFile.status === 'completed' && (
-                      <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                    )}
-                    {uploadedFile.status === 'error' && (
-                      <AlertCircle className="h-5 w-5 text-destructive" />
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeFile(uploadedFile.id)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeFile(uploadedFile.id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -324,36 +264,36 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
         </Card>
       )}
 
-      {/* Analysis Button */}
-      {completedCount > 0 && (
+      {/* Run Analysis Button */}
+      {files.length > 0 && !analysisResult && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="flex items-center justify-between p-6">
             <div>
-              <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
+              <h3 className="text-lg font-semibold text-foreground">
+                {isAnalyzing ? 'Analyzing Documents...' : 'Ready to Analyze'}
+              </h3>
               <p className="text-sm text-muted-foreground">
-                {completedCount} documents ready for AI-powered analysis
+                {isAnalyzing 
+                  ? analysisProgress 
+                  : `${files.length} documents will be auto-classified and analyzed`
+                }
               </p>
             </div>
             <Button
               size="lg"
               onClick={runAnalysis}
               disabled={isAnalyzing}
-              className="min-w-[160px]"
+              className="min-w-[180px]"
             >
               {isAnalyzing ? (
                 <>
                   <Spinner className="mr-2" />
                   Analyzing...
                 </>
-              ) : analysisComplete ? (
-                <>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  View Results
-                </>
               ) : (
                 <>
                   <Play className="mr-2 h-4 w-4" />
-                  Run Analysis
+                  Analyze Documents
                 </>
               )}
             </Button>
@@ -361,55 +301,209 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
         </Card>
       )}
 
-      {/* Analysis Pipeline Info */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">AI Analysis Pipeline</CardTitle>
-          <CardDescription>
-            Your documents will be processed by specialized AI agents
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {[
-              {
-                name: 'Document Classification',
-                description: 'Automatically identifies document types and extracts metadata',
-              },
-              {
-                name: 'Lease Abstraction',
-                description: 'Extracts 40+ key terms from lease documents',
-              },
-              {
-                name: 'Rent Roll Analysis',
-                description: 'Parses and normalizes tenant data, calculates metrics',
-              },
-              {
-                name: 'RSF Reconciliation',
-                description: 'Cross-references square footage across all sources',
-              },
-              {
-                name: 'Red Flag Detection',
-                description: 'Identifies risks, discrepancies, and issues',
-              },
-              {
-                name: 'Deal Scoring',
-                description: 'Generates comprehensive 0-100 deal score',
-              },
-            ].map((agent, index) => (
-              <div key={agent.name} className="flex items-start gap-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
-                  {index + 1}
+      {/* Analysis Results */}
+      {analysisResult && (
+        <div className="space-y-4">
+          {analysisResult.success ? (
+            <>
+              {/* RSF Recovery Alert */}
+              {analysisResult.rsf_analysis?.discrepancy_found && (
+                <Card className="border-amber-500/50 bg-amber-500/10">
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="rounded-full bg-amber-500/20 p-3">
+                        <TrendingUp className="h-6 w-6 text-amber-400" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-amber-400">
+                          RSF Recovery Opportunity Found
+                        </h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Discrepancy of{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatNumber(analysisResult.rsf_analysis.reconciliation.discrepancy_sf || 0)} SF
+                          </span>
+                          {' '}detected across document sources
+                        </p>
+                        {analysisResult.rsf_analysis.recovery_opportunity?.annual_value && (
+                          <p className="mt-2 text-2xl font-bold text-amber-400">
+                            {formatCurrency(analysisResult.rsf_analysis.recovery_opportunity.annual_value)}
+                            <span className="ml-2 text-sm font-normal text-muted-foreground">
+                              potential annual recovery
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Document Classification Results */}
+              {analysisResult.documents && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Document Classification</CardTitle>
+                    <CardDescription>
+                      {analysisResult.documents.total} documents auto-classified
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {analysisResult.documents.files.map((doc, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between rounded-md border border-border bg-card p-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                            <span className="text-sm font-medium">{doc.filename}</span>
+                          </div>
+                          <Badge variant="secondary">{doc.type}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Risk Summary */}
+              {analysisResult.risk && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Risk Assessment</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-6">
+                      <div className="text-center">
+                        <div className={cn(
+                          'text-4xl font-bold',
+                          analysisResult.risk.tier === 'GREEN' && 'text-emerald-400',
+                          analysisResult.risk.tier === 'YELLOW' && 'text-yellow-400',
+                          analysisResult.risk.tier === 'ORANGE' && 'text-orange-400',
+                          analysisResult.risk.tier === 'RED' && 'text-red-400',
+                        )}>
+                          {analysisResult.risk.score}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Deal Score</div>
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        {analysisResult.risk.red_flag_count.critical > 0 && (
+                          <div className="flex items-center gap-2 text-red-400">
+                            <AlertTriangle className="h-4 w-4" />
+                            <span className="text-sm">{analysisResult.risk.red_flag_count.critical} Critical Issues</span>
+                          </div>
+                        )}
+                        {analysisResult.risk.red_flag_count.high > 0 && (
+                          <div className="flex items-center gap-2 text-orange-400">
+                            <AlertCircle className="h-4 w-4" />
+                            <span className="text-sm">{analysisResult.risk.red_flag_count.high} High Priority</span>
+                          </div>
+                        )}
+                        {analysisResult.risk.red_flag_count.moderate > 0 && (
+                          <div className="flex items-center gap-2 text-yellow-400">
+                            <AlertCircle className="h-4 w-4" />
+                            <span className="text-sm">{analysisResult.risk.red_flag_count.moderate} Moderate</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* What to Get Next */}
+              {analysisResult.what_to_get_next && analysisResult.what_to_get_next.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Recommended Next Documents</CardTitle>
+                    <CardDescription>
+                      Upload these to improve analysis accuracy
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {analysisResult.what_to_get_next.map((item, i) => (
+                        <li key={i} className="flex items-center gap-2 text-sm">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                            {i + 1}
+                          </span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card className="border-destructive/50 bg-destructive/10">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <AlertCircle className="h-6 w-6 text-destructive" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-destructive">Analysis Failed</h3>
+                    <p className="text-sm text-muted-foreground">{analysisResult.error}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{agent.name}</p>
-                  <p className="text-xs text-muted-foreground">{agent.description}</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* How it Works */}
+      {files.length === 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">How It Works</CardTitle>
+            <CardDescription>
+              Fully adaptive - just upload files, the system handles the rest
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[
+                {
+                  step: 1,
+                  name: 'Upload Any Documents',
+                  description: 'Drop rent rolls, leases, BOMA certs, financials - any format',
+                },
+                {
+                  step: 2,
+                  name: 'Auto-Classification',
+                  description: 'AI identifies document types and extracts text (OCR if needed)',
+                },
+                {
+                  step: 3,
+                  name: 'Data Extraction',
+                  description: 'Structured data pulled based on document type',
+                },
+                {
+                  step: 4,
+                  name: 'RSF Reconciliation',
+                  description: 'Cross-reference SF across all sources to find discrepancies',
+                },
+                {
+                  step: 5,
+                  name: 'Recovery Report',
+                  description: 'Identify properties underpaying and calculate recovery value',
+                },
+              ].map((item) => (
+                <div key={item.step} className="flex items-start gap-4">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
+                    {item.step}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">{item.description}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

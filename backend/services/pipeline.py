@@ -1,22 +1,26 @@
 """
-CRE Document Intelligence Pipeline
-Collapsed 15-node design based on the n8n technical reference.
+CRE Document Intelligence Pipeline - Adaptive Document Processing
 
-The 6-stage pipeline:
-1. File Extraction - Universal ingestion with OCR detection
-2. Classification - Single node classifies all documents  
-3. Extraction - Config-driven extraction for all 9 doc types
-4. Synthesis - Cross-document analysis and scoring
-5. Verification - Arithmetic checks and confidence thresholds
-6. Output - Formatted for all 6 sheet tabs
+This pipeline is fully adaptive:
+1. Upload ANY document(s) - no need to specify count or type
+2. Auto-detects file type (PDF, Excel, image)
+3. Auto-determines if OCR is needed (scanned vs text PDF)
+4. Auto-classifies document type using AI
+5. Extracts relevant data based on classification
+6. Synthesizes analysis from whatever docs are available
+7. Outputs report showing RSF discrepancies and recovery opportunities
+
+The goal: Help Don identify properties underpaying on square footage.
 """
 
 import asyncio
 import json
 import re
+import base64
 from datetime import datetime
 from typing import Any
 from openai import AsyncOpenAI
+import io
 
 from config.extraction_prompts import (
     EXTRACTION_PROMPTS,
@@ -26,7 +30,6 @@ from config.extraction_prompts import (
     DOC_TYPES,
 )
 from models.schemas import (
-    DocumentType,
     DealAnalysis,
     LeaseAbstractPipeline as LeaseAbstract,
     TenantInfo,
@@ -38,9 +41,9 @@ from models.schemas import (
 
 class CREPipeline:
     """
-    Collapsed 15-node CRE Document Intelligence Pipeline.
+    Adaptive CRE Document Intelligence Pipeline.
     
-    Replaces the 76-node n8n workflow with config-driven extraction.
+    Just upload files - the pipeline figures out everything else.
     """
     
     def __init__(self, api_key: str | None = None):
@@ -50,219 +53,355 @@ class CREPipeline:
         )
         self.model = "anthropic/claude-sonnet-4"
     
-    async def run(self, deal_name: str, documents: list[dict]) -> DealAnalysis:
+    # =========================================================================
+    # MAIN ENTRY POINT - Just pass files, get analysis
+    # =========================================================================
+    
+    async def analyze(self, files: list[dict], deal_name: str = None) -> dict:
         """
-        Run the full 6-stage pipeline on a document package.
+        Main entry point - analyze any uploaded documents.
         
         Args:
-            deal_name: Name of the deal being analyzed
-            documents: List of {filename, content, file_type} dicts
+            files: List of file dicts, each with:
+                - filename: Original filename
+                - content: File content (text for PDFs, base64 for images/excel)
+                - content_type: MIME type (optional, will auto-detect)
+            deal_name: Optional name for this analysis (auto-generated if not provided)
             
         Returns:
-            Complete DealAnalysis with scores, flags, and recommendations
+            Complete analysis report with RSF discrepancies and recommendations
         """
-        # Stage 1: File Extraction (already done by caller - documents have content)
-        doc_objects = self._assemble_documents(deal_name, documents)
+        if not deal_name:
+            deal_name = f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # Stage 2: Classification
-        classified_docs = await self._classify_documents(doc_objects)
+        # Stage 1: Ingest and prepare all files
+        documents = await self._ingest_files(files)
         
-        # Stage 3: Extraction (config-driven, handles all 9 types)
-        extractions = await self._extract_all_documents(classified_docs)
-        
-        # Stage 4: Synthesis
-        synthesis = await self._synthesize_deal(deal_name, extractions)
-        
-        # Stage 5: Verification
-        verified = await self._verify_analysis(synthesis, extractions)
-        
-        # Stage 6: Output formatting
-        return self._format_output(deal_name, verified, extractions)
-    
-    # =========================================================================
-    # STAGE 1: File Extraction / Document Assembly
-    # =========================================================================
-    
-    def _assemble_documents(self, deal_name: str, documents: list[dict]) -> list[dict]:
-        """
-        Universal File Ingestion - Assemble all documents into uniform objects.
-        Replaces: Extract Pages from PDF, Extract_Rent_Roll, Extract_Lease×8, etc.
-        """
-        doc_objects = []
-        for i, doc in enumerate(documents):
-            content = doc.get("content", "")
-            doc_obj = {
-                "doc_id": f"{deal_name}_{i}",
+        if not documents:
+            return {
+                "success": False,
                 "deal_name": deal_name,
-                "file_name": doc.get("filename", f"document_{i}"),
-                "file_extension": self._get_extension(doc.get("filename", "")),
-                "mime_type": doc.get("mime_type", "application/octet-stream"),
-                "raw_text": content[:50000],  # Truncate to 50k chars
-                "has_text": len(content.strip()) > 100,
-                "was_truncated": len(content) > 50000,
-                "original_char_count": len(content),
-                "needs_ocr": len(content.strip()) < 100,  # Scanned PDF detection
-                "pipeline_stage": "assembled",
+                "error": "No processable documents found",
+                "documents_received": len(files),
             }
-            doc_objects.append(doc_obj)
-        return doc_objects
+        
+        # Stage 2: Classify each document
+        classified = await self._classify_all(documents)
+        
+        # Stage 3: Extract data from each document
+        extracted = await self._extract_all(classified)
+        
+        # Stage 4: Synthesize cross-document analysis
+        synthesis = await self._synthesize(deal_name, extracted)
+        
+        # Stage 5: Build final report
+        report = self._build_report(deal_name, extracted, synthesis)
+        
+        return report
     
-    def _get_extension(self, filename: str) -> str:
-        if "." in filename:
-            return filename.rsplit(".", 1)[-1].lower()
-        return ""
+    # Alias for backwards compatibility
+    async def run(self, deal_name: str, documents: list[dict]) -> DealAnalysis:
+        """Legacy interface - wraps analyze()."""
+        result = await self.analyze(documents, deal_name)
+        return self._to_deal_analysis(result)
     
     # =========================================================================
-    # STAGE 2: Classification
+    # STAGE 1: File Ingestion - Auto-detect type and extract text
     # =========================================================================
     
-    async def _classify_documents(self, documents: list[dict]) -> list[dict]:
+    async def _ingest_files(self, files: list[dict]) -> list[dict]:
         """
-        Classify Documents - Single node, loops all docs.
-        Replaces: Build Classification Payload, Claude - Classify Doc, Parse Classification, Route by Doc Type
+        Ingest any files - auto-detect type, OCR if needed, extract text.
         """
-        tasks = [self._classify_single(doc) for doc in documents]
+        documents = []
+        
+        for i, file in enumerate(files):
+            filename = file.get("filename", f"document_{i}")
+            content = file.get("content", "")
+            content_type = file.get("content_type", self._guess_content_type(filename))
+            
+            doc = {
+                "id": f"doc_{i}",
+                "filename": filename,
+                "content_type": content_type,
+                "file_ext": self._get_ext(filename),
+                "ingested_at": datetime.utcnow().isoformat(),
+            }
+            
+            # Extract text based on file type
+            if self._is_excel(filename, content_type):
+                doc["text"] = await self._extract_excel_text(content, filename)
+                doc["source_type"] = "excel"
+            elif self._is_pdf(filename, content_type):
+                text = self._extract_pdf_text(content)
+                if len(text.strip()) < 100:
+                    # Likely scanned - needs OCR
+                    doc["text"] = await self._ocr_document(content, filename)
+                    doc["source_type"] = "pdf_ocr"
+                else:
+                    doc["text"] = text
+                    doc["source_type"] = "pdf_text"
+            elif self._is_image(filename, content_type):
+                doc["text"] = await self._ocr_document(content, filename)
+                doc["source_type"] = "image_ocr"
+            else:
+                # Assume it's already text
+                doc["text"] = content if isinstance(content, str) else str(content)
+                doc["source_type"] = "text"
+            
+            # Only include if we got meaningful text
+            if doc.get("text") and len(doc["text"].strip()) > 50:
+                doc["char_count"] = len(doc["text"])
+                documents.append(doc)
+        
+        return documents
+    
+    def _guess_content_type(self, filename: str) -> str:
+        """Guess MIME type from filename."""
+        ext = self._get_ext(filename)
+        types = {
+            "pdf": "application/pdf",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xls": "application/vnd.ms-excel",
+            "csv": "text/csv",
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "tiff": "image/tiff",
+            "tif": "image/tiff",
+        }
+        return types.get(ext, "application/octet-stream")
+    
+    def _get_ext(self, filename: str) -> str:
+        return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    
+    def _is_excel(self, filename: str, content_type: str) -> bool:
+        ext = self._get_ext(filename)
+        return ext in ["xlsx", "xls", "csv"] or "spreadsheet" in content_type or "excel" in content_type
+    
+    def _is_pdf(self, filename: str, content_type: str) -> bool:
+        return self._get_ext(filename) == "pdf" or content_type == "application/pdf"
+    
+    def _is_image(self, filename: str, content_type: str) -> bool:
+        ext = self._get_ext(filename)
+        return ext in ["png", "jpg", "jpeg", "tiff", "tif"] or content_type.startswith("image/")
+    
+    def _extract_pdf_text(self, content: str | bytes) -> str:
+        """Extract text from PDF using PyPDF2."""
+        try:
+            from PyPDF2 import PdfReader
+            
+            if isinstance(content, str):
+                # Might be base64 encoded
+                try:
+                    content = base64.b64decode(content)
+                except:
+                    return content  # Already text
+            
+            pdf = PdfReader(io.BytesIO(content))
+            text_parts = []
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    text_parts.append(text)
+            return "\n\n".join(text_parts)
+        except Exception as e:
+            return f"[PDF extraction error: {e}]"
+    
+    async def _extract_excel_text(self, content: str | bytes, filename: str) -> str:
+        """Extract text representation from Excel file."""
+        try:
+            import pandas as pd
+            
+            if isinstance(content, str):
+                try:
+                    content = base64.b64decode(content)
+                except:
+                    return content
+            
+            # Read all sheets
+            excel_file = pd.ExcelFile(io.BytesIO(content))
+            text_parts = []
+            
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                text_parts.append(f"=== Sheet: {sheet_name} ===")
+                text_parts.append(df.to_string())
+            
+            return "\n\n".join(text_parts)
+        except Exception as e:
+            return f"[Excel extraction error: {e}]"
+    
+    async def _ocr_document(self, content: str | bytes, filename: str) -> str:
+        """
+        OCR a scanned document or image using Claude's vision.
+        """
+        try:
+            if isinstance(content, bytes):
+                b64_content = base64.b64encode(content).decode("utf-8")
+            else:
+                b64_content = content
+            
+            # Determine media type
+            ext = self._get_ext(filename)
+            media_types = {
+                "pdf": "application/pdf",
+                "png": "image/png",
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "tiff": "image/tiff",
+            }
+            media_type = media_types.get(ext, "image/png")
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=8000,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": b64_content,
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": "Extract ALL text from this document. Preserve the structure including tables, columns, and formatting. Return only the extracted text, no commentary."
+                            }
+                        ]
+                    }
+                ],
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"[OCR error: {e}]"
+    
+    # =========================================================================
+    # STAGE 2: Classification - What type of document is this?
+    # =========================================================================
+    
+    async def _classify_all(self, documents: list[dict]) -> list[dict]:
+        """Classify all documents in parallel."""
+        tasks = [self._classify_one(doc) for doc in documents]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        classified = []
         for doc, result in zip(documents, results):
             if isinstance(result, Exception):
                 doc["doc_type"] = "UNKNOWN"
-                doc["classification_confidence"] = 0.0
                 doc["classification_error"] = str(result)
             else:
                 doc.update(result)
-            doc["pipeline_stage"] = "classified"
-            classified.append(doc)
         
-        return classified
+        return documents
     
-    async def _classify_single(self, doc: dict) -> dict:
-        """Classify a single document using Claude."""
-        # Use first AND last 1500 chars for better classification
-        text = doc["raw_text"]
-        sample = text[:1500]
-        if len(text) > 3000:
-            sample += "\n\n[...]\n\n" + text[-1500:]
+    async def _classify_one(self, doc: dict) -> dict:
+        """Classify a single document."""
+        # Sample beginning and end for better classification
+        text = doc.get("text", "")
+        sample = text[:2000]
+        if len(text) > 4000:
+            sample += "\n\n[...middle truncated...]\n\n" + text[-2000:]
         
         response = await self.client.chat.completions.create(
             model=self.model,
             max_tokens=500,
             messages=[
                 {"role": "system", "content": CLASSIFICATION_PROMPT},
-                {"role": "user", "content": f"Classify this document:\n\n{sample}"},
+                {
+                    "role": "user",
+                    "content": f"Filename: {doc.get('filename', 'unknown')}\n\nDocument text:\n{sample}"
+                },
             ],
         )
         
-        content = response.choices[0].message.content
-        parsed = self._parse_json_response(content)
+        result = self._parse_json(response.choices[0].message.content)
         
         return {
-            "doc_type": parsed.get("doc_type", "UNKNOWN"),
-            "classification_confidence": parsed.get("confidence", 0.5),
-            "classification_reasoning": parsed.get("reasoning", ""),
+            "doc_type": result.get("doc_type", "UNKNOWN"),
+            "confidence": result.get("confidence", 0.5),
+            "reasoning": result.get("reasoning", ""),
         }
     
     # =========================================================================
-    # STAGE 3: Extraction (Config-Driven)
+    # STAGE 3: Extraction - Pull structured data based on doc type
     # =========================================================================
     
-    async def _extract_all_documents(self, documents: list[dict]) -> list[dict]:
-        """
-        Extract Documents - ONE node with config map, loops all classified docs.
-        Replaces: 27 extraction lane nodes (Build Payload × 9 + Claude Call × 9 + Parse × 9)
-        """
-        tasks = [self._extract_single(doc) for doc in documents]
+    async def _extract_all(self, documents: list[dict]) -> list[dict]:
+        """Extract data from all documents in parallel."""
+        tasks = [self._extract_one(doc) for doc in documents]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        extractions = []
         for doc, result in zip(documents, results):
             if isinstance(result, Exception):
-                extraction = {
-                    **doc,
-                    "extraction": {},
-                    "extraction_error": str(result),
-                }
+                doc["extraction"] = {"error": str(result)}
             else:
-                extraction = {
-                    **doc,
-                    "extraction": result,
-                    "extraction_timestamp": datetime.utcnow().isoformat(),
-                }
-            
-            # Apply lease enrichment (months_remaining, risk_level)
-            if doc["doc_type"] in ["LEASE", "LEASE_ABSTRACT"]:
-                extraction = self._enrich_lease_extraction(extraction)
-            
-            extraction["pipeline_stage"] = "extracted"
-            extractions.append(extraction)
+                doc["extraction"] = result
+                
+            # Enrich lease documents
+            if doc.get("doc_type") in ["LEASE", "LEASE_ABSTRACT"]:
+                self._enrich_lease(doc)
         
-        return extractions
+        return documents
     
-    async def _extract_single(self, doc: dict) -> dict:
-        """Extract structured data from a single document using config-driven prompts."""
+    async def _extract_one(self, doc: dict) -> dict:
+        """Extract structured data from one document."""
         doc_type = doc.get("doc_type", "UNKNOWN")
         
-        # Get extraction prompt from config map
-        prompt_config = EXTRACTION_PROMPTS.get(doc_type)
-        if not prompt_config:
-            return {"_note": f"No extraction config for {doc_type}"}
+        # Get config for this doc type
+        config = EXTRACTION_PROMPTS.get(doc_type)
+        if not config:
+            return {"_note": f"No extraction config for {doc_type}", "raw_text_sample": doc.get("text", "")[:500]}
         
-        system_prompt = prompt_config["system"]
-        fields = prompt_config.get("fields", [])
+        text = doc.get("text", "")
+        # Truncate to avoid token limits
+        if len(text) > 40000:
+            text = text[:20000] + "\n\n[...truncated...]\n\n" + text[-20000:]
         
-        user_prompt = f"""Extract the following fields from this {doc_type} document:
+        prompt = f"""Extract the following fields from this {doc_type} document.
 
-Fields to extract: {', '.join(fields)}
+Fields to extract: {', '.join(config.get('fields', []))}
 
-Document content:
-{doc['raw_text']}
+Document:
+{text}
 
-Return a JSON object with each field. For each field, include:
-- value: the extracted value
-- confidence: 0.0-1.0 confidence score
-- source_text: the exact text from the document that supports this value
-
-If a field cannot be found, set value to null and confidence to 0."""
+Return JSON with each field. Include the extracted value, or null if not found.
+For numeric values (SF, rent, etc), extract just the number without formatting."""
 
         response = await self.client.chat.completions.create(
             model=self.model,
             max_tokens=4000,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": config.get("system", "You are a CRE document analyst.")},
+                {"role": "user", "content": prompt},
             ],
         )
         
-        content = response.choices[0].message.content
-        return self._parse_json_response(content)
+        return self._parse_json(response.choices[0].message.content)
     
-    def _enrich_lease_extraction(self, extraction: dict) -> dict:
-        """
-        Lease Abstract Rent Roll enrichment.
-        Adds: months_remaining, risk_level, monthly_rent, abstract_complete, missing_fields
-        """
-        ext = extraction.get("extraction", {})
+    def _enrich_lease(self, doc: dict):
+        """Add calculated fields to lease extractions."""
+        ext = doc.get("extraction", {})
         
         # Calculate months remaining
-        expiry = ext.get("lease_expiration_date", {})
-        expiry_value = expiry.get("value") if isinstance(expiry, dict) else expiry
-        
+        expiry = ext.get("lease_expiration_date") or ext.get("expiration_date")
         months_remaining = None
         risk_level = "UNKNOWN"
         
-        if expiry_value:
+        if expiry:
             try:
-                # Try to parse the date
-                from dateutil import parser as date_parser
-                expiry_date = date_parser.parse(expiry_value)
+                from dateutil import parser
+                exp_date = parser.parse(str(expiry))
                 today = datetime.now()
-                months_remaining = (expiry_date.year - today.year) * 12 + (expiry_date.month - today.month)
+                months_remaining = (exp_date.year - today.year) * 12 + (exp_date.month - today.month)
                 
-                # Assign risk level
                 if months_remaining <= 0:
-                    risk_level = "CRITICAL"
-                elif months_remaining <= 3:
+                    risk_level = "EXPIRED"
+                elif months_remaining <= 6:
                     risk_level = "CRITICAL"
                 elif months_remaining <= 12:
                     risk_level = "HIGH"
@@ -273,465 +412,246 @@ If a field cannot be found, set value to null and confidence to 0."""
             except:
                 pass
         
-        # Derive monthly rent if missing
-        annual_rent = ext.get("annual_base_rent", {})
-        annual_value = annual_rent.get("value") if isinstance(annual_rent, dict) else annual_rent
-        monthly_rent = None
-        if annual_value:
-            try:
-                monthly_rent = float(str(annual_value).replace(",", "").replace("$", "")) / 12
-            except:
-                pass
-        
-        # Check for missing key fields
-        key_fields = ["tenant_name", "premises_address", "rentable_sf", "lease_commencement_date", 
-                      "lease_expiration_date", "annual_base_rent", "expense_structure"]
-        missing_fields = [f for f in key_fields if not ext.get(f)]
-        
-        extraction["enrichment"] = {
+        doc["enriched"] = {
             "months_remaining": months_remaining,
             "risk_level": risk_level,
-            "monthly_rent": monthly_rent,
-            "abstract_complete": len(missing_fields) == 0,
-            "missing_fields": missing_fields,
+        }
+    
+    # =========================================================================
+    # STAGE 4: Synthesis - Cross-document analysis
+    # =========================================================================
+    
+    async def _synthesize(self, deal_name: str, documents: list[dict]) -> dict:
+        """
+        Synthesize all extracted data into a comprehensive analysis.
+        Focus: RSF discrepancies and recovery opportunities.
+        """
+        # Group docs by type
+        by_type = {}
+        for doc in documents:
+            dtype = doc.get("doc_type", "UNKNOWN")
+            if dtype not in by_type:
+                by_type[dtype] = []
+            by_type[dtype].append({
+                "filename": doc.get("filename"),
+                "extraction": doc.get("extraction", {}),
+                "enriched": doc.get("enriched", {}),
+            })
+        
+        # Build summary for synthesis
+        summary = {
+            "deal_name": deal_name,
+            "document_types_present": list(by_type.keys()),
+            "document_count": len(documents),
+            "documents_by_type": {k: len(v) for k, v in by_type.items()},
+            "extractions": by_type,
         }
         
-        return extraction
-    
-    # =========================================================================
-    # STAGE 4: Synthesis
-    # =========================================================================
-    
-    async def _synthesize_deal(self, deal_name: str, extractions: list[dict]) -> dict:
-        """
-        Synthesize Deal - Cross-document analysis, scoring, and recommendations.
-        Replaces: Build Synthesis Payload, Claude - Synthesize Deal, Parse Synthesis
-        """
-        # Slim extractions to reduce token count (13k -> 5k)
-        slimmed = self._slim_extractions(extractions)
-        
-        # Group by doc type
-        by_type = {}
-        for ext in extractions:
-            doc_type = ext.get("doc_type", "UNKNOWN")
-            if doc_type not in by_type:
-                by_type[doc_type] = []
-            by_type[doc_type].append(ext)
-        
-        present_types = list(by_type.keys())
-        lease_count = len(by_type.get("LEASE", [])) + len(by_type.get("LEASE_ABSTRACT", []))
-        
-        user_prompt = f"""Analyze this commercial real estate deal package.
+        prompt = f"""Analyze this CRE deal package and produce a comprehensive report.
 
-Deal Name: {deal_name}
-Documents Present: {', '.join(present_types)}
-Number of Leases: {lease_count}
+CRITICAL FOCUS: Identify RSF (rentable square footage) discrepancies between sources.
+Don needs to find properties that may be underpaying based on incorrect SF.
 
-Extractions:
-{json.dumps(slimmed, indent=2)}
+Deal Package:
+{json.dumps(summary, indent=2, default=str)}
 
-Produce a comprehensive analysis including:
-1. RSF Reconciliation - Compare SF across rent roll, leases, BOMA, county PA
-2. Rent Verification - Validate rent calculations and pro-rata shares
-3. Lease Audit - WALT calculation, expiry schedule, risk assessment
-4. Financial Summary - NOI, vacancy, AR concerns, CAM recovery
-5. Deal Score - Score 0-100 with sub-scores for each dimension
-6. Red Flags - List all issues by severity (CRITICAL, HIGH, MODERATE, LOW)
-7. What To Get Next - Prioritized list of missing documents
-8. RSF Recovery Opportunity - Dollar estimate if SF discrepancies found
+Produce analysis with these sections:
 
-Return as JSON with these top-level keys:
-rsf_reconciliation, rent_verification, lease_audit, financial_summary, 
-deal_score, red_flags, what_to_get_next, rsf_recovery_opportunity"""
+1. RSF_RECONCILIATION
+   - Compare SF from: rent roll, leases, BOMA measurement, county PA records
+   - Calculate discrepancy_sf (difference between highest and lowest)
+   - Calculate discrepancy_pct
+   - Identify which tenants have SF mismatches
+
+2. RSF_RECOVERY_OPPORTUNITY
+   - If discrepancies exist, calculate potential annual revenue recovery
+   - Use formula: discrepancy_sf * average_rent_psf
+   - Flag tenants who may be underpaying
+
+3. TENANT_ANALYSIS
+   - List all tenants with their SF from each source
+   - Flag any with >2% variance across sources
+   - Include lease expiry and risk level
+
+4. RED_FLAGS
+   - List issues by severity: CRITICAL, HIGH, MODERATE, LOW
+   - Include: SF discrepancies, lease expirations, missing docs, calculation errors
+
+5. DEAL_SCORE
+   - Score 0-100 based on data quality and risk
+   - Sub-scores for: data_completeness, rsf_accuracy, lease_health, financial_clarity
+
+6. WHAT_TO_GET_NEXT
+   - Prioritized list of missing documents that would improve analysis
+   - Focus on docs that would resolve SF discrepancies
+
+7. FINANCIAL_SUMMARY
+   - NOI, total rent, vacancy, WALT if calculable from available docs
+
+Return as JSON with these exact top-level keys."""
 
         response = await self.client.chat.completions.create(
             model=self.model,
             max_tokens=8000,
             messages=[
                 {"role": "system", "content": SYNTHESIS_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": prompt},
             ],
         )
         
-        content = response.choices[0].message.content
-        synthesis = self._parse_json_response(content)
-        synthesis["synthesis_timestamp"] = datetime.utcnow().isoformat()
-        
-        return synthesis
-    
-    def _slim_extractions(self, extractions: list[dict]) -> list[dict]:
-        """
-        Collapse {value, confidence, source_text} objects to just values.
-        Reduces prompt from ~13k to ~5k tokens.
-        """
-        slimmed = []
-        for ext in extractions:
-            slim = {
-                "doc_id": ext.get("doc_id"),
-                "doc_type": ext.get("doc_type"),
-                "file_name": ext.get("file_name"),
-            }
-            
-            extraction = ext.get("extraction", {})
-            slim_extraction = {}
-            for key, value in extraction.items():
-                if isinstance(value, dict) and "value" in value:
-                    slim_extraction[key] = value["value"]
-                else:
-                    slim_extraction[key] = value
-            
-            slim["extraction"] = slim_extraction
-            
-            # Include enrichment if present
-            if "enrichment" in ext:
-                slim["enrichment"] = ext["enrichment"]
-            
-            slimmed.append(slim)
-        
-        return slimmed
+        return self._parse_json(response.choices[0].message.content)
     
     # =========================================================================
-    # STAGE 5: Verification
+    # STAGE 5: Build Final Report
     # =========================================================================
     
-    async def _verify_analysis(self, synthesis: dict, extractions: list[dict]) -> dict:
+    def _build_report(self, deal_name: str, documents: list[dict], synthesis: dict) -> dict:
         """
-        Verify Analysis - Arithmetic checks and confidence thresholds.
-        Replaces: Arithmetic Verification, Flatten Fields, Build Verification Payload, 
-                  Claude - Independent Verification, Apply Confidence Thresholds
+        Build the final report that Don can use.
         """
-        # Arithmetic verification
-        arithmetic = self._arithmetic_verification(synthesis, extractions)
+        # Extract key metrics
+        rsf_recon = synthesis.get("RSF_RECONCILIATION", synthesis.get("rsf_reconciliation", {}))
+        recovery = synthesis.get("RSF_RECOVERY_OPPORTUNITY", synthesis.get("rsf_recovery_opportunity", {}))
+        red_flags = synthesis.get("RED_FLAGS", synthesis.get("red_flags", []))
+        score_data = synthesis.get("DEAL_SCORE", synthesis.get("deal_score", {}))
         
-        # Flatten fields for verification
-        flattened = self._flatten_fields(extractions)
-        
-        # Filter to high-impact fields only (reduces verification payload)
-        high_impact = self._filter_high_impact_fields(flattened)
-        
-        # Independent verification (optional - can be expensive)
-        # verified_fields = await self._independent_verification(high_impact)
+        # Normalize red flags to list
+        if isinstance(red_flags, dict):
+            flat_flags = []
+            for severity, flags in red_flags.items():
+                if isinstance(flags, list):
+                    for f in flags:
+                        if isinstance(f, str):
+                            flat_flags.append({"severity": severity, "message": f})
+                        else:
+                            flat_flags.append({**f, "severity": severity})
+            red_flags = flat_flags
         
         return {
-            "synthesis": synthesis,
-            "arithmetic_verification": arithmetic,
-            "flattened_fields": flattened,
-            "high_impact_fields": high_impact,
+            "success": True,
+            "deal_name": deal_name,
+            "analyzed_at": datetime.utcnow().isoformat(),
+            
+            # Document summary
+            "documents": {
+                "total": len(documents),
+                "by_type": self._count_by_type(documents),
+                "files": [
+                    {
+                        "filename": d.get("filename"),
+                        "type": d.get("doc_type"),
+                        "confidence": d.get("confidence"),
+                    }
+                    for d in documents
+                ],
+            },
+            
+            # RSF Analysis - THE KEY OUTPUT
+            "rsf_analysis": {
+                "reconciliation": rsf_recon,
+                "recovery_opportunity": recovery,
+                "discrepancy_found": bool(rsf_recon.get("discrepancy_sf", 0)),
+            },
+            
+            # Risk assessment
+            "risk": {
+                "score": score_data.get("score", score_data.get("overall", 0)),
+                "tier": self._score_to_tier(score_data.get("score", score_data.get("overall", 0))),
+                "sub_scores": score_data.get("sub_scores", {}),
+                "red_flags": red_flags,
+                "red_flag_count": {
+                    "critical": len([f for f in red_flags if f.get("severity") == "CRITICAL"]),
+                    "high": len([f for f in red_flags if f.get("severity") == "HIGH"]),
+                    "moderate": len([f for f in red_flags if f.get("severity") == "MODERATE"]),
+                    "low": len([f for f in red_flags if f.get("severity") == "LOW"]),
+                },
+            },
+            
+            # Tenants
+            "tenants": synthesis.get("TENANT_ANALYSIS", synthesis.get("tenant_analysis", [])),
+            
+            # Financial
+            "financial": synthesis.get("FINANCIAL_SUMMARY", synthesis.get("financial_summary", {})),
+            
+            # Next steps
+            "what_to_get_next": synthesis.get("WHAT_TO_GET_NEXT", synthesis.get("what_to_get_next", [])),
+            
+            # Full synthesis for reference
+            "_raw_synthesis": synthesis,
         }
     
-    def _arithmetic_verification(self, synthesis: dict, extractions: list[dict]) -> dict:
-        """
-        Arithmetic Verification - Recalculate key figures and flag mismatches.
-        Checks: PA vs Rent Roll SF, NOI calculation, CAP rate, DSCR, pro-rata shares, etc.
-        """
-        checks = []
-        
-        def v(obj, *paths):
-            """Extract numeric value from various formats."""
-            for path in paths:
-                val = obj
-                for key in path.split("."):
-                    if isinstance(val, dict):
-                        val = val.get(key)
-                    else:
-                        val = None
-                        break
-                if val is not None:
-                    try:
-                        return float(str(val).replace(",", "").replace("$", "").replace("%", ""))
-                    except:
-                        pass
-            return None
-        
-        def chk(name: str, stated: float | None, computed: float | None, formula: str, tolerance: float = 0.01) -> dict:
-            """Compare two values within tolerance."""
-            if stated is None or computed is None:
-                return {"check": name, "status": "INCOMPLETE", "stated": stated, "computed": computed, "formula": formula}
-            
-            if stated == 0:
-                delta_pct = 0 if computed == 0 else 100
-            else:
-                delta_pct = abs(stated - computed) / abs(stated) * 100
-            
-            status = "VERIFIED" if delta_pct <= tolerance * 100 else "CALC_MISMATCH"
-            
-            return {
-                "check": name,
-                "status": status,
-                "stated": stated,
-                "computed": computed,
-                "delta_pct": round(delta_pct, 2),
-                "formula": formula,
-            }
-        
-        # Get values from synthesis
-        rsf = synthesis.get("rsf_reconciliation", {})
-        fin = synthesis.get("financial_summary", {})
-        
-        # Check: NOI = Revenue - OpEx
-        revenue = v(fin, "total_revenue", "gross_income")
-        opex = v(fin, "total_opex", "operating_expenses")
-        stated_noi = v(fin, "noi", "net_operating_income")
-        if revenue and opex:
-            checks.append(chk("NOI Calculation", stated_noi, revenue - opex, "NOI = Revenue - OpEx"))
-        
-        # Check: Rent PSF = Annual Rent / RSF
-        annual_rent = v(fin, "total_annual_rent", "annual_base_rent")
-        total_rsf = v(rsf, "rent_roll_rsf", "total_rsf")
-        stated_psf = v(fin, "rent_psf", "average_rent_psf")
-        if annual_rent and total_rsf and total_rsf > 0:
-            checks.append(chk("Rent PSF", stated_psf, annual_rent / total_rsf, "Rent PSF = Annual Rent / RSF"))
-        
-        # Check: RSF sources match
-        rent_roll_rsf = v(rsf, "sources.RENT_ROLL", "rent_roll_rsf")
-        boma_rsf = v(rsf, "sources.BOMA", "boma_rsf")
-        lease_rsf = v(rsf, "sources.LEASE", "lease_rsf")
-        
-        if rent_roll_rsf and boma_rsf:
-            checks.append(chk("BOMA vs Rent Roll RSF", rent_roll_rsf, boma_rsf, "BOMA RSF should match Rent Roll RSF", 0.05))
-        
-        mismatches = [c for c in checks if c["status"] == "CALC_MISMATCH"]
-        
-        return {
-            "checks": checks,
-            "total": len(checks),
-            "verified": len([c for c in checks if c["status"] == "VERIFIED"]),
-            "mismatches": len(mismatches),
-            "mismatch_details": mismatches,
-        }
+    def _count_by_type(self, documents: list[dict]) -> dict:
+        counts = {}
+        for doc in documents:
+            dtype = doc.get("doc_type", "UNKNOWN")
+            counts[dtype] = counts.get(dtype, 0) + 1
+        return counts
     
-    def _flatten_fields(self, extractions: list[dict]) -> list[dict]:
-        """
-        Flatten all extraction fields into a flat array for verification.
-        Each record: {field_path, value, confidence, doc_type, source_text}
-        """
-        flattened = []
-        
-        def flatten_obj(obj: dict, path: str, doc_type: str, doc_id: str):
-            for key, value in obj.items():
-                if key.startswith("_"):
-                    continue
-                
-                field_path = f"{path}.{key}" if path else key
-                
-                if isinstance(value, dict):
-                    if "value" in value:
-                        # This is a field with confidence
-                        flattened.append({
-                            "doc_id": doc_id,
-                            "doc_type": doc_type,
-                            "field_path": field_path,
-                            "value": value.get("value"),
-                            "confidence": value.get("confidence", 0.5),
-                            "source_text": value.get("source_text", ""),
-                        })
-                    else:
-                        # Nested object
-                        flatten_obj(value, field_path, doc_type, doc_id)
-                elif isinstance(value, list):
-                    for i, item in enumerate(value):
-                        if isinstance(item, dict):
-                            flatten_obj(item, f"{field_path}[{i}]", doc_type, doc_id)
-        
-        for ext in extractions:
-            extraction = ext.get("extraction", {})
-            flatten_obj(extraction, "", ext.get("doc_type", "UNKNOWN"), ext.get("doc_id", ""))
-        
-        return flattened
-    
-    def _filter_high_impact_fields(self, flattened: list[dict]) -> list[dict]:
-        """
-        Filter to high-impact fields only: high dollar impact, conflicts, or low confidence.
-        Reduces verification payload from 100+ to 10-20 most important fields.
-        """
-        high_impact_keywords = [
-            "rsf", "sf", "square", "rent", "noi", "revenue", "income",
-            "expense", "cam", "price", "value", "total", "annual",
-        ]
-        
-        filtered = []
-        for field in flattened:
-            path_lower = field["field_path"].lower()
-            
-            # Include if: low confidence OR high-value field
-            is_low_confidence = field.get("confidence", 1.0) < 0.8
-            is_high_value = any(kw in path_lower for kw in high_impact_keywords)
-            
-            if is_low_confidence or is_high_value:
-                filtered.append(field)
-        
-        return filtered[:20]  # Limit to top 20
-    
-    # =========================================================================
-    # STAGE 6: Output Formatting
-    # =========================================================================
-    
-    def _format_output(self, deal_name: str, verified: dict, extractions: list[dict]) -> DealAnalysis:
-        """
-        Format Output - Structure data for all 6 sheet tabs.
-        Replaces: Build Deal Snapshot Rows, Build Audit Log Rows, Build Rent Rows, 
-                  Build Lease Audit Rows, Build Risk Dashboard, Blue Platform Value
-        """
-        synthesis = verified.get("synthesis", {})
-        arithmetic = verified.get("arithmetic_verification", {})
-        
-        # Extract deal score
-        deal_score = synthesis.get("deal_score", {})
-        if isinstance(deal_score, dict):
-            overall_score = deal_score.get("overall", deal_score.get("total", 0))
+    def _score_to_tier(self, score: float) -> str:
+        if score >= 85:
+            return "GREEN"
+        elif score >= 70:
+            return "YELLOW"
+        elif score >= 50:
+            return "ORANGE"
         else:
-            overall_score = deal_score if isinstance(deal_score, (int, float)) else 0
-        
-        # Determine tier
-        if overall_score >= 80:
-            tier = "READY"
-        elif overall_score >= 60:
-            tier = "NEEDS_WORK"
-        else:
-            tier = "HIGH_RISK"
-        
-        # Format red flags
-        red_flags = []
-        raw_flags = synthesis.get("red_flags", [])
-        if isinstance(raw_flags, list):
-            for flag in raw_flags:
-                if isinstance(flag, dict):
-                    red_flags.append(RedFlag(
-                        severity=Severity(flag.get("severity", "MODERATE").upper()),
-                        category=flag.get("category", "General"),
-                        description=flag.get("description", flag.get("flag", "")),
-                        impact=flag.get("impact", ""),
-                        resolution=flag.get("resolution", flag.get("recommended_action", "")),
-                    ))
-        
-        # Format RSF reconciliation
-        rsf_data = synthesis.get("rsf_reconciliation", {})
-        rsf = RSFReconciliation(
-            rent_roll_rsf=rsf_data.get("sources", {}).get("RENT_ROLL", rsf_data.get("rent_roll_rsf")),
-            lease_rsf=rsf_data.get("sources", {}).get("LEASE", rsf_data.get("lease_rsf")),
-            boma_rsf=rsf_data.get("sources", {}).get("BOMA", rsf_data.get("boma_rsf")),
-            county_pa_rsf=rsf_data.get("sources", {}).get("COUNTY_PA", rsf_data.get("county_pa_rsf")),
-            discrepancy_sf=rsf_data.get("max_discrepancy_sf", rsf_data.get("discrepancy")),
-            discrepancy_pct=rsf_data.get("max_discrepancy_pct", rsf_data.get("discrepancy_pct")),
-        )
-        
-        # Calculate RSF recovery opportunity
-        rsf_recovery = synthesis.get("rsf_recovery_opportunity", {})
-        if isinstance(rsf_recovery, dict):
-            recovery_sf = rsf_recovery.get("recoverable_sf", 0)
-            recovery_dollar = rsf_recovery.get("annual_value", rsf_recovery.get("dollar_estimate", 0))
-        else:
-            recovery_sf = 0
-            recovery_dollar = 0
-        
-        # Format tenants from rent roll extractions
-        tenants = []
-        for ext in extractions:
-            if ext.get("doc_type") in ["RENT_ROLL", "RENT_ROLL_XLSX", "MANAGEMENT_REPORT"]:
-                tenant_list = ext.get("extraction", {}).get("tenants", [])
-                if isinstance(tenant_list, list):
-                    for t in tenant_list:
-                        if isinstance(t, dict):
-                            tenants.append(TenantInfo(
-                                name=t.get("tenant_name", t.get("name", "Unknown")),
-                                suite=t.get("suite", ""),
-                                rsf=t.get("rsf", t.get("rentable_sf", 0)),
-                                lease_start=t.get("lease_start", t.get("commencement_date")),
-                                lease_end=t.get("lease_end", t.get("expiration_date")),
-                                monthly_rent=t.get("monthly_rent", 0),
-                                annual_rent=t.get("annual_rent", t.get("annual_base_rent", 0)),
-                                rent_psf=t.get("rent_psf", 0),
-                            ))
-        
-        # Format lease abstracts
-        lease_abstracts = []
-        for ext in extractions:
-            if ext.get("doc_type") in ["LEASE", "LEASE_ABSTRACT"]:
-                e = ext.get("extraction", {})
-                enrichment = ext.get("enrichment", {})
-                
-                def get_val(field):
-                    val = e.get(field, {})
-                    return val.get("value") if isinstance(val, dict) else val
-                
-                lease_abstracts.append(LeaseAbstract(
-                    tenant_name=get_val("tenant_name"),
-                    premises_address=get_val("premises_address"),
-                    suite=get_val("suite"),
-                    rentable_sf=get_val("rentable_sf"),
-                    lease_commencement=get_val("lease_commencement_date"),
-                    lease_expiration=get_val("lease_expiration_date"),
-                    lease_term_months=get_val("lease_term_months"),
-                    annual_base_rent=get_val("annual_base_rent"),
-                    monthly_rent=enrichment.get("monthly_rent"),
-                    rent_escalation=get_val("rent_escalation"),
-                    expense_structure=get_val("expense_structure"),
-                    cam_cap=get_val("cam_cap"),
-                    renewal_options=get_val("renewal_options"),
-                    early_termination=get_val("early_termination_rights"),
-                    tenant_improvements=get_val("ti_allowance"),
-                    missing_fields=enrichment.get("missing_fields", []),
-                    months_remaining=enrichment.get("months_remaining"),
-                    risk_level=enrichment.get("risk_level"),
-                ))
-        
-        # Format what to get next
-        what_to_get_next = synthesis.get("what_to_get_next", [])
-        if isinstance(what_to_get_next, list):
-            what_to_get_next = [
-                item if isinstance(item, str) else item.get("document", str(item))
-                for item in what_to_get_next
-            ]
-        
-        # Build financial summary
-        fin = synthesis.get("financial_summary", {})
-        
+            return "RED"
+    
+    def _to_deal_analysis(self, report: dict) -> DealAnalysis:
+        """Convert report dict to DealAnalysis model."""
         return DealAnalysis(
-            deal_name=deal_name,
-            overall_score=overall_score,
-            tier=tier,
-            sub_scores=deal_score if isinstance(deal_score, dict) else {},
-            red_flags=red_flags,
-            rsf_reconciliation=rsf,
-            rsf_recovery_sf=recovery_sf,
-            rsf_recovery_annual_value=recovery_dollar,
-            tenants=tenants,
-            lease_abstracts=lease_abstracts,
-            noi=fin.get("noi"),
-            walt_months=synthesis.get("lease_audit", {}).get("walt_months"),
-            vacancy_pct=fin.get("vacancy_pct", fin.get("vacancy")),
-            ar_outstanding=fin.get("ar_outstanding", fin.get("ar_concern")),
-            what_to_get_next=what_to_get_next,
-            arithmetic_checks=arithmetic.get("checks", []),
-            analysis_timestamp=datetime.utcnow().isoformat(),
-            documents_processed=len(extractions),
+            deal_name=report.get("deal_name", ""),
+            overall_score=report.get("risk", {}).get("score", 0),
+            tier=report.get("risk", {}).get("tier", "UNKNOWN"),
+            sub_scores=report.get("risk", {}).get("sub_scores", {}),
+            red_flags=[
+                RedFlag(
+                    severity=Severity(f.get("severity", "LOW")),
+                    category=f.get("category", "GENERAL"),
+                    message=f.get("message", ""),
+                    recommendation=f.get("recommendation", ""),
+                )
+                for f in report.get("risk", {}).get("red_flags", [])
+            ],
+            rsf_reconciliation=RSFReconciliation(
+                rent_roll_rsf=report.get("rsf_analysis", {}).get("reconciliation", {}).get("rent_roll_rsf"),
+                lease_rsf=report.get("rsf_analysis", {}).get("reconciliation", {}).get("lease_rsf"),
+                boma_rsf=report.get("rsf_analysis", {}).get("reconciliation", {}).get("boma_rsf"),
+                county_pa_rsf=report.get("rsf_analysis", {}).get("reconciliation", {}).get("county_pa_rsf"),
+                discrepancy_sf=report.get("rsf_analysis", {}).get("reconciliation", {}).get("discrepancy_sf"),
+                discrepancy_pct=report.get("rsf_analysis", {}).get("reconciliation", {}).get("discrepancy_pct"),
+            ),
+            rsf_recovery_sf=report.get("rsf_analysis", {}).get("recovery_opportunity", {}).get("sf", 0),
+            rsf_recovery_annual_value=report.get("rsf_analysis", {}).get("recovery_opportunity", {}).get("annual_value", 0),
+            what_to_get_next=report.get("what_to_get_next", []),
+            analysis_timestamp=report.get("analyzed_at", ""),
+            documents_processed=report.get("documents", {}).get("total", 0),
         )
     
     # =========================================================================
     # Utilities
     # =========================================================================
     
-    def _parse_json_response(self, content: str) -> dict:
-        """Parse JSON from Claude response, handling markdown fencing."""
-        if not content:
-            return {"_parse_error": "Empty response"}
-        
-        # Try to extract JSON from markdown code blocks
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+    def _parse_json(self, text: str) -> dict:
+        """Extract JSON from LLM response."""
+        # Try to find JSON in code blocks
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
         if json_match:
-            content = json_match.group(1)
+            text = json_match.group(1)
+        
+        # Try to parse directly
+        try:
+            return json.loads(text.strip())
+        except:
+            pass
         
         # Try to find JSON object
-        content = content.strip()
+        try:
+            start = text.find('{')
+            end = text.rfind('}') + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
+        except:
+            pass
         
-        # Find the first { and last }
-        start = content.find("{")
-        end = content.rfind("}")
-        
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(content[start:end + 1])
-            except json.JSONDecodeError as e:
-                return {"_parse_error": str(e), "_raw": content[start:end + 1][:500]}
-        
-        return {"_parse_error": "No JSON found", "_raw": content[:500]}
+        return {"_raw": text, "_parse_error": True}

@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: cre-document-intelligence-backend
+Version: 0.1.0
+Summary: CRE Document Intelligence Platform - AI-powered document analysis backend
+Requires-Python: >=3.12
+Requires-Dist: fastapi[standard]>=0.128.1
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: openai>=1.40.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: PyPDF2>=3.0.0
+Requires-Dist: openpyxl>=3.1.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: python-dateutil>=2.8.0
