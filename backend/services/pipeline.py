@@ -1,16 +1,25 @@
 """
-CRE Document Intelligence Pipeline — Multi-Hop Agentic Architecture
+CRE Document Intelligence Pipeline — Multi-Hop Agentic Architecture with COVE
 
-Every number in the final report is grounded to a source.
+Every number in the final report is grounded to a source and confidence-scored.
 Pipeline hops:
-  1. INGEST   — extract raw text from PDF/Excel/image
-  2. CLASSIFY — identify document type
-  3. EXTRACT  — structured data extraction per doc type (chunked for large docs)
-  4. RECONCILE — pure Python arithmetic: totals, RSF deltas, rent PSF (no AI, no hallucination)
-  5. SYNTHESIZE — AI analysis grounded in the reconciled numbers (flags, score, what-to-get-next)
-  6. VERIFY   — Python post-check: assert AI numbers match reconciled numbers, fix if not
-  7. REPORT   — build final response with every number cited to its source
+  1. INGEST    — extract raw text from PDF/Excel/image
+  2. CLASSIFY  — identify document type
+  3. EXTRACT   — structured data extraction per doc type (chunked for large docs)
+  4. COVE      — Cross-Output Verification & Evidence: compare values across all
+                  extraction passes; compute per-field agreement score.
+                  Numbers with <90% agreement are flagged UNVERIFIED and suppressed
+                  from the final output (shown as null with a flag).
+  5. RECONCILE — pure Python arithmetic on VERIFIED values only: totals, RSF deltas,
+                  rent PSF (no AI, no hallucination)
+  6. SYNTHESIZE — AI analysis grounded in the reconciled numbers (flags, score, what-to-get-next)
+  7. VERIFY    — Python post-check: assert AI numbers match reconciled numbers, fix if not
+  8. REPORT    — build final response; every number carries its confidence score and source
 """
+
+# COVE confidence threshold: values must agree across passes to this tolerance
+COVE_AGREEMENT_THRESHOLD = 0.90   # 90%
+COVE_VALUE_TOLERANCE_PCT  = 0.05  # two reads are "same" if within 5% of each other
 
 import asyncio
 import json
@@ -115,30 +124,45 @@ class CREPipeline:
         total_tenants = sum(len(doc.get("extraction", {}).get("tenants") or []) for doc in documents)
         self.tracer.log("HOP_3", f"Extraction complete — {total_tenants} tenant rows found across all docs", "success" if total_tenants > 0 else "warning")
 
-        # ── HOP 4: Reconcile (pure Python arithmetic — no AI, no hallucination) ──
-        self.tracer.log("HOP_4", "Reconciling numbers (arithmetic only, no AI)...", "info")
-        reconciliation = self._reconcile(documents, property_appraiser_sf)
+        # ── HOP 4: Chain of Verification (CoVe) ─────────────────────────────
+        # Generates verification questions per tenant, re-answers them independently
+        # from source text, and cross-compares. Values with <90% agreement are
+        # suppressed — they appear in output as "— (unverified)".
+        self.tracer.log("HOP_4", "Chain of Verification: re-verifying every extracted value independently...", "info")
+        documents = await self._cove(documents)
+        verified   = sum(1 for d in documents for t in (d.get("cove_tenants") or []) if t.get("_cove_verified", False))
+        unverified = sum(1 for d in documents for t in (d.get("cove_tenants") or []) if not t.get("_cove_verified", False))
         self.tracer.log(
             "HOP_4",
-            f"Reconciled: {reconciliation['tenant_count']} tenants | "
-            f"{reconciliation['rent_roll_total_sf']:,.0f} SF total | "
-            f"${reconciliation['total_annual_rent']:,.0f}/yr rent | "
+            f"CoVe complete — {verified} tenants VERIFIED (>=90%), {unverified} suppressed (<90%)",
+            "success" if unverified == 0 else "warning",
+        )
+
+        # ── HOP 5: Reconcile (pure Python arithmetic, verified values only) ──
+        self.tracer.log("HOP_5", "Reconciling numbers (Python arithmetic only, no AI)...", "info")
+        reconciliation = self._reconcile(documents, property_appraiser_sf)
+        self.tracer.log(
+            "HOP_5",
+            f"Reconciled: {reconciliation['tenant_count']} tenants "
+            f"({reconciliation.get('unverified_suppressed', 0)} suppressed by CoVe) | "
+            f"{reconciliation['rent_roll_total_sf']:,.0f} SF | "
+            f"${reconciliation['total_annual_rent']:,.0f}/yr | "
             f"RSF gap: {reconciliation['rsf_gap_sf']:,.0f} SF",
             "success",
         )
 
-        # ── HOP 5: Synthesize (AI grounded in reconciled numbers) ───────────
-        self.tracer.log("HOP_5", "AI synthesis (grounded in reconciled numbers)...", "info")
+        # ── HOP 6: Synthesize (AI grounded in reconciled numbers) ───────────
+        self.tracer.log("HOP_6", "AI synthesis (grounded in reconciled numbers)...", "info")
         synthesis = await self._synthesize(deal_name, documents, reconciliation)
-        self.tracer.log("HOP_5", f"Synthesis: {len(synthesis.get('red_flags') or [])} flags | score {synthesis.get('deal_score', {}).get('overall_score', '?')}", "success")
+        self.tracer.log("HOP_6", f"Synthesis: {len(synthesis.get('red_flags') or [])} flags | score {synthesis.get('deal_score', {}).get('overall_score', '?')}", "success")
 
-        # ── HOP 6: Verify (Python checks AI output against reconciled truth) ─
-        self.tracer.log("HOP_6", "Verifying AI output against reconciled numbers...", "info")
+        # ── HOP 7: Verify (Python checks AI output against reconciled truth) ─
+        self.tracer.log("HOP_7", "Verifying AI output against reconciled numbers...", "info")
         synthesis = self._verify_and_correct(synthesis, reconciliation)
-        self.tracer.log("HOP_6", "Verification complete", "success")
+        self.tracer.log("HOP_7", "Verification complete", "success")
 
-        # ── HOP 7: Build report ─────────────────────────────────────────────
-        self.tracer.log("HOP_7", "Building final report...", "info")
+        # ── HOP 8: Build report ─────────────────────────────────────────────
+        self.tracer.log("HOP_8", "Building final report...", "info")
         report = self._build_report(deal_name, documents, synthesis, reconciliation)
 
         score = report.get("score", 0)
@@ -484,13 +508,17 @@ class CREPipeline:
             bucket = doc_buckets[i]
             if not bucket:
                 doc["extraction"] = {"tenants": [], "summary": {}, "error": "All extraction attempts failed"}
+                doc["_all_pass_results"] = []
                 continue
 
             # Typed pass is primary
             typed = next((r for lbl, r in bucket if lbl == "typed"), {}) or {}
             merged = dict(typed)
 
-            # Merge tenants from all chunk passes (de-dupe by name)
+            # All individual pass results stored for CoVe cross-comparison
+            all_pass_results: list[dict] = [r for _, r in bucket]
+
+            # Merge tenants from all chunk passes (de-dupe by name+suite)
             all_tenants: list[dict] = list(merged.get("tenants") or [])
             seen_names: set[str] = {self._tenant_key(t) for t in all_tenants}
 
@@ -509,6 +537,8 @@ class CREPipeline:
 
             merged["tenants"] = all_tenants
             doc["extraction"] = merged
+            # Store every pass result so _cove can cross-compare values
+            doc["_all_pass_results"] = all_pass_results
 
             # Enrich leases with months-remaining
             if doc.get("doc_type") in ["LEASE", "LEASE_ABSTRACT"]:
@@ -516,7 +546,7 @@ class CREPipeline:
 
             self.tracer.log(
                 "HOP_3",
-                f"  {doc['filename']}: {len(all_tenants)} tenants from {len(bucket)} pass(es)",
+                f"  {doc['filename']}: {len(all_tenants)} tenants merged from {len(bucket)} pass(es)",
                 "success" if all_tenants else "warning",
             )
 
@@ -554,6 +584,234 @@ class CREPipeline:
         )
         return self._parse_json(response.choices[0].message.content)
 
+    # =========================================================================
+    # HOP 4 — CHAIN OF VERIFICATION (CoVe)
+    # =========================================================================
+
+    async def _cove(self, documents: list[dict]) -> list[dict]:
+        """
+        True Chain of Verification:
+        1. For each tenant extracted in Hop 3, generate specific verification
+           questions ("What is [Tenant X]'s RSF?", "What is [Tenant X]'s annual rent?")
+        2. Re-answer each question independently by scanning the source text — NOT
+           from the stored extraction (to avoid anchoring on the first answer).
+        3. Compare original extraction answer vs. CoVe re-answer. If they agree
+           within COVE_VALUE_TOLERANCE_PCT (5%), the field is VERIFIED. Otherwise
+           UNVERIFIED and suppressed.
+        4. Additionally, cross-compare values across chunked extraction passes —
+           if multiple passes saw the tenant and agree, confidence increases further.
+
+        A tenant is marked VERIFIED overall only if BOTH rsf AND rent are verified.
+        Numbers that don't pass CoVe appear in the UI as "— (unverified)" and are
+        excluded from all arithmetic in Hop 5.
+        """
+        # Run CoVe verification for all documents in parallel
+        tasks = [self._cove_one(doc) for doc in documents]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return documents
+
+    async def _cove_one(self, doc: dict):
+        """Run Chain of Verification for a single document."""
+        extraction = doc.get("extraction", {})
+        tenants    = list(extraction.get("tenants") or [])
+        source_text = doc.get("text", "")
+        all_passes  = doc.get("_all_pass_results", [])
+
+        if not tenants:
+            doc["cove_tenants"] = []
+            doc["cove_summary"] = {"verified": 0, "unverified": 0, "passes": len(all_passes) + 1}
+            return
+
+        # ── Step 1: Build cross-pass lookup ──────────────────────────────────
+        # Every chunk/typed pass that found this tenant is a separate "read"
+        pass_lookup: dict[str, list[dict]] = {}
+        for pass_result in all_passes:
+            for t in (pass_result.get("tenants") or []):
+                if not t:
+                    continue
+                key = self._tenant_key(t)
+                if not key:
+                    continue
+                pass_lookup.setdefault(key, []).append({
+                    "rsf":         self._sf(t.get("rsf") or t.get("rentable_sf") or 0),
+                    "annual_rent": self._sf(t.get("annual_base_rent") or t.get("annual_rent") or
+                                           self._sf(t.get("monthly_base_rent") or t.get("monthly_rent") or 0) * 12),
+                })
+
+        # ── Step 2: Generate + answer verification questions via AI ──────────
+        # Ask the AI to independently re-look up each tenant's key numbers
+        # from the source text — with explicit instruction not to use memory.
+        if source_text and tenants:
+            tenant_names = [
+                t.get("tenant_name") or t.get("tenant") or t.get("name") or ""
+                for t in tenants[:30]  # cap at 30 to fit context
+            ]
+            tenant_list = "\n".join(f"- {n}" for n in tenant_names if n)
+
+            # Truncate source text for the verification call
+            verify_text = source_text[:25000] if len(source_text) > 25000 else source_text
+
+            verify_prompt = (
+                f"You are verifying numbers extracted from a CRE document. "
+                f"Re-read the document text below and answer each question by scanning the text directly. "
+                f"Do NOT use prior knowledge — only what is written in the text below.\n\n"
+                f"For each of these tenants, look up their RSF and annual rent from the document:\n"
+                f"{tenant_list}\n\n"
+                f"Document text:\n{verify_text}\n\n"
+                f"Return ONLY valid JSON — an array of objects, one per tenant found:\n"
+                f'[{{"tenant_name": "...", "rsf": <number or null>, "annual_rent": <number or null>}}]\n\n'
+                f"RULES:\n"
+                f"- Use bare numbers (no $ or commas)\n"
+                f"- If a tenant is not found in the text, still include them with null values\n"
+                f"- Do NOT guess — return null if you cannot find the value in the text"
+            )
+
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=3000,
+                    messages=[{"role": "user", "content": verify_prompt}],
+                )
+                raw = response.choices[0].message.content
+                # Parse the verification answers
+                parsed = self._parse_json_array(raw)
+                verify_lookup: dict[str, dict] = {}
+                for item in (parsed if isinstance(parsed, list) else []):
+                    if not isinstance(item, dict):
+                        continue
+                    name = (item.get("tenant_name") or "").strip().lower()
+                    if name:
+                        verify_lookup[name] = {
+                            "rsf":         self._sf(item.get("rsf") or 0),
+                            "annual_rent": self._sf(item.get("annual_rent") or 0),
+                        }
+            except Exception as e:
+                self.tracer.log("HOP_4", f"  CoVe AI call failed for {doc.get('filename')}: {e}", "error")
+                verify_lookup = {}
+        else:
+            verify_lookup = {}
+
+        # ── Step 3: Score each tenant field ──────────────────────────────────
+        cove_tenants = []
+        for t in tenants:
+            key  = self._tenant_key(t)
+            name = (t.get("tenant_name") or t.get("tenant") or t.get("name") or "").strip().lower()
+
+            rsf_extracted  = self._sf(t.get("rsf") or t.get("rentable_sf") or 0)
+            rent_extracted = self._sf(
+                t.get("annual_base_rent") or t.get("annual_rent") or
+                self._sf(t.get("monthly_base_rent") or t.get("monthly_rent") or 0) * 12
+            )
+
+            # Collect all reads for this tenant: extracted + CoVe + all chunk passes
+            rsf_reads  = [rsf_extracted]  if rsf_extracted  else []
+            rent_reads = [rent_extracted] if rent_extracted else []
+
+            # Add CoVe re-answer
+            cove_answer = verify_lookup.get(name, {})
+            if cove_answer.get("rsf"):
+                rsf_reads.append(cove_answer["rsf"])
+            if cove_answer.get("annual_rent"):
+                rent_reads.append(cove_answer["annual_rent"])
+
+            # Add cross-pass reads
+            for read in pass_lookup.get(key, []):
+                if read["rsf"]:
+                    rsf_reads.append(read["rsf"])
+                if read["annual_rent"]:
+                    rent_reads.append(read["annual_rent"])
+
+            # Score agreement: what fraction of reads agree with the primary read within tolerance?
+            def _agreement(primary: float, reads: list[float]) -> float:
+                if len(reads) < 2:
+                    # Only one source — max 70% confidence (not enough evidence to reach 90%)
+                    return 0.70
+                agreements = sum(
+                    1 for r in reads
+                    if primary > 0 and abs(r - primary) / primary <= COVE_VALUE_TOLERANCE_PCT
+                )
+                return agreements / len(reads)
+
+            rsf_conf  = _agreement(rsf_extracted,  rsf_reads)
+            rent_conf = _agreement(rent_extracted, rent_reads)
+
+            # Overall confidence: both fields must pass for the tenant to be VERIFIED
+            overall_conf   = (rsf_conf + rent_conf) / 2
+            confidence_pct = round(overall_conf * 100, 1)
+            rsf_verified   = rsf_conf  >= COVE_AGREEMENT_THRESHOLD
+            rent_verified  = rent_conf >= COVE_AGREEMENT_THRESHOLD
+            fully_verified = rsf_verified and rent_verified
+
+            entry = dict(t)
+            entry["_cove_verified"]     = fully_verified
+            entry["_verified"]          = fully_verified  # used by _reconcile
+            entry["_confidence_pct"]    = confidence_pct
+            entry["_rsf_confidence"]    = round(rsf_conf  * 100, 1)
+            entry["_rent_confidence"]   = round(rent_conf * 100, 1)
+            entry["_cove_reads"]        = {"rsf": len(rsf_reads), "rent": len(rent_reads)}
+            entry["_cove_status"]       = "VERIFIED" if fully_verified else "UNVERIFIED"
+            entry["_cove_answer"]       = cove_answer  # the re-verified values
+
+            # Suppress unverified numeric fields — set to None, not removed
+            # They appear in the UI as "— (unverified)" to flag for manual check
+            if not rsf_verified:
+                entry["rsf"]               = None
+                entry["rentable_sf"]       = None
+                entry["_rsf_suppressed"]   = True
+            if not rent_verified:
+                entry["annual_base_rent"]  = None
+                entry["annual_rent"]       = None
+                entry["monthly_base_rent"] = None
+                entry["monthly_rent"]      = None
+                entry["_rent_suppressed"]  = True
+
+            cove_tenants.append(entry)
+
+        verified_n   = sum(1 for t in cove_tenants if t["_cove_verified"])
+        unverified_n = len(cove_tenants) - verified_n
+
+        doc["cove_tenants"] = cove_tenants
+        doc["cove_summary"] = {
+            "verified":     verified_n,
+            "unverified":   unverified_n,
+            "total_passes": 1 + len(all_passes),
+            "used_ai_verification": bool(verify_lookup),
+        }
+        self.tracer.log(
+            "HOP_4",
+            f"  {doc.get('filename')}: {verified_n}/{len(cove_tenants)} tenants VERIFIED "
+            f"({len(all_passes)+1} passes, AI re-verify: {'yes' if verify_lookup else 'no'})",
+            "success" if unverified_n == 0 else "warning",
+        )
+
+    def _parse_json_array(self, text: str) -> list:
+        """Parse a JSON array from AI output, stripping markdown fences."""
+        if not text:
+            return []
+        text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
+        text = re.sub(r"\s*```$", "", text.strip(), flags=re.MULTILINE)
+        text = text.strip()
+        # Try direct array parse
+        try:
+            result = json.loads(text)
+            if isinstance(result, list):
+                return result
+            # Could be wrapped: {"tenants": [...]}
+            if isinstance(result, dict):
+                for v in result.values():
+                    if isinstance(v, list):
+                        return v
+        except json.JSONDecodeError:
+            pass
+        # Fallback: find first [...] block
+        match = re.search(r"\[[\s\S]*\]", text)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                pass
+        return []
+
     def _tenant_key(self, t: dict) -> str:
         name = (t.get("tenant_name") or t.get("tenant") or t.get("name") or "").strip().lower()
         suite = (t.get("suite") or t.get("suite_number") or "").strip().lower()
@@ -582,52 +840,75 @@ class CREPipeline:
 
     def _reconcile(self, documents: list[dict], pa_sf: float | None) -> dict:
         """
-        Aggregate all extracted tenant rows and compute all numeric values
-        using Python arithmetic only. No AI involved. Every number here is
-        directly derivable from what the AI extracted.
+        Aggregate CoVe-verified tenant rows and compute all numeric values
+        using Python arithmetic only. No AI involved.
+
+        Only tenants that passed CoVe (_cove_verified=True) contribute to totals.
+        Unverified tenants are still included in the output for transparency, but
+        their suppressed fields (rsf=None, rent=None) contribute 0 to all sums.
         """
         all_tenants: list[dict] = []
-        source_doc_map: dict[str, str] = {}  # tenant_key → filename
+        unverified_suppressed = 0
 
         for doc in documents:
-            for t in (doc.get("extraction", {}).get("tenants") or []):
+            # Always prefer CoVe-scored tenants; fall back to raw extraction
+            tenant_source = doc.get("cove_tenants") or doc.get("extraction", {}).get("tenants") or []
+            for t in tenant_source:
                 if t is None:
                     continue
                 key = self._tenant_key(t)
                 if not key:
                     continue
                 t["_source_doc"] = doc.get("filename", "")
+                if t.get("_cove_verified") is False:
+                    unverified_suppressed += 1
                 all_tenants.append(t)
-                source_doc_map[key] = doc.get("filename", "")
 
         def sf(t):   return self._sf(t.get("rsf") or t.get("rentable_sf") or t.get("usf") or 0)
         def rent(t): return self._sf(t.get("annual_base_rent") or t.get("annual_rent") or (self._sf(t.get("monthly_base_rent") or t.get("monthly_rent") or 0) * 12))
 
-        total_sf   = sum(sf(t) for t in all_tenants)
-        total_rent = sum(rent(t) for t in all_tenants)
+        # Only use CoVe-VERIFIED tenants for totals — unverified values are arithmetically untrusted
+        verified_tenants = [t for t in all_tenants if t.get("_cove_verified", t.get("_verified", True))]
+        total_sf   = sum(sf(t) for t in verified_tenants)
+        total_rent = sum(rent(t) for t in verified_tenants)
         avg_psf    = (total_rent / total_sf) if total_sf > 0 else 0
 
         # RSF gap
         rsf_gap_sf    = max(0.0, (pa_sf or 0) - total_sf) if pa_sf else 0.0
         rsf_gap_value = rsf_gap_sf * avg_psf if avg_psf else 0.0
 
-        # Per-tenant enrichment with source citation
+        # Per-tenant enrichment with CoVe confidence and source citation
         enriched_tenants = []
         for t in all_tenants:
-            t_sf   = sf(t)
-            t_rent = rent(t)
+            cove_verified = t.get("_cove_verified", t.get("_verified", True))  # default True if CoVe didn't run
+            conf_pct      = t.get("_confidence_pct", 100.0 if cove_verified else 0.0)
+            rsf_supp      = t.get("_rsf_suppressed", False)
+            rent_supp     = t.get("_rent_suppressed", False)
+
+            t_sf   = sf(t)   if not rsf_supp   else None
+            t_rent = rent(t) if not rent_supp   else None
+
             enriched_tenants.append({
-                "tenant":          t.get("tenant_name") or t.get("tenant") or t.get("name") or "Unknown",
-                "suite":           t.get("suite") or t.get("suite_number") or "",
-                "rsf":             t_sf,
-                "annual_rent":     t_rent,
-                "monthly_rent":    round(t_rent / 12, 2) if t_rent else 0,
-                "rent_psf":        round(t_rent / t_sf, 2) if t_sf and t_rent else 0,
-                "lease_start":     t.get("lease_start") or t.get("lease_commencement_date") or "",
-                "lease_end":       t.get("lease_end") or t.get("lease_expiration_date") or "",
-                "status":          t.get("status") or "Active",
-                "ar_balance":      self._sf(t.get("ar_balance") or 0),
-                "_source_doc":     t.get("_source_doc", ""),
+                "tenant":           t.get("tenant_name") or t.get("tenant") or t.get("name") or "Unknown",
+                "suite":            t.get("suite") or t.get("suite_number") or "",
+                "rsf":              t_sf,
+                "annual_rent":      t_rent,
+                "monthly_rent":     round(t_rent / 12, 2) if t_rent else None,
+                "rent_psf":         round(t_rent / t_sf, 2) if t_sf and t_rent else None,
+                "lease_start":      t.get("lease_start") or t.get("lease_commencement_date") or "",
+                "lease_end":        t.get("lease_end") or t.get("lease_expiration_date") or "",
+                "status":           t.get("status") or "Active",
+                "ar_balance":       self._sf(t.get("ar_balance") or 0),
+                "_source_doc":      t.get("_source_doc", ""),
+                # CoVe verification metadata — surfaced in the UI
+                "_cove_verified":   cove_verified,
+                "_cove_status":     t.get("_cove_status", "VERIFIED" if cove_verified else "UNVERIFIED"),
+                "_confidence_pct":  conf_pct,
+                "_rsf_confidence":  t.get("_rsf_confidence", 100.0 if cove_verified else 0.0),
+                "_rent_confidence": t.get("_rent_confidence", 100.0 if cove_verified else 0.0),
+                "_cove_reads":      t.get("_cove_reads", {}),
+                "_rsf_suppressed":  rsf_supp,
+                "_rent_suppressed": rent_supp,
             })
 
         # WALT (weighted average lease term)
@@ -651,9 +932,11 @@ class CREPipeline:
                 sum_mismatch = f"Tenant SF sum ({total_sf:,.0f}) differs from stated total ({stated_total_sf:,.0f}) by {delta:,.0f} SF"
 
         return {
-            # Tenant data (sourced directly from extraction)
-            "tenants":               enriched_tenants,
-            "tenant_count":          len(enriched_tenants),
+            # Tenant data (sourced directly from extraction, CoVe-scored)
+            "tenants":                 enriched_tenants,
+            "tenant_count":            len(enriched_tenants),
+            "verified_tenant_count":   sum(1 for t in enriched_tenants if t.get("_cove_verified", True)),
+            "unverified_suppressed":   unverified_suppressed,
             # RSF numbers
             "rent_roll_total_sf":    total_sf,
             "property_appraiser_sf": pa_sf,
@@ -997,14 +1280,36 @@ RULES:
             # Lease abstracts (from lease docs)
             "lease_abstracts": self._extract_lease_abstracts(documents),
 
+            # COVE confidence summary
+            "cove": {
+                "threshold_pct":          COVE_AGREEMENT_THRESHOLD * 100,
+                "verified_tenants":       recon.get("verified_tenant_count", recon["tenant_count"]),
+                "unverified_tenants":     recon.get("unverified_tenant_count", 0),
+                "total_tenants":          recon["tenant_count"],
+                "suppressed_fields":      [
+                    f"{t['tenant']} (suite {t['suite']}): confidence {t.get('_confidence_pct', 0):.0f}% — RSF and/or rent suppressed"
+                    for t in recon["tenants"] if not t.get("_verified", True)
+                ],
+            },
+
             # Pipeline metadata
             "_pipeline": {
-                "hops": 7,
-                "tenant_count": recon["tenant_count"],
-                "rsf_gap_sf": gap_sf,
-                "rsf_gap_pct": recon["rsf_gap_pct"],
-                "corrections_applied": synthesis.get("_corrections", []),
-                "source_documents": recon["source_documents"],
+                "hops": 8,
+                "tenant_count":          recon["tenant_count"],
+                "verified_tenant_count": recon.get("verified_tenant_count", recon["tenant_count"]),
+                "unverified_suppressed": recon.get("unverified_suppressed", 0),
+                "rsf_gap_sf":            gap_sf,
+                "rsf_gap_pct":           recon["rsf_gap_pct"],
+                "corrections_applied":   synthesis.get("_corrections", []),
+                "source_documents":      recon["source_documents"],
+                # CoVe summary per document
+                "cove_summary": [
+                    {
+                        "filename": d.get("filename"),
+                        **( d.get("cove_summary") or {} ),
+                    }
+                    for d in documents
+                ],
             },
         }
 

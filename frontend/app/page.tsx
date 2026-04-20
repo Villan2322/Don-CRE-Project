@@ -122,7 +122,14 @@ interface AnalysisAPIResponse {
     total: number
     files: Array<{ filename: string; type: string; confidence?: number }>
   }
-  trace_log?: Array<{ stage: string; message: string; level: string }>
+  trace_log?: Array<{ stage: string; message: string; level: string; timestamp?: string }>
+  cove?: {
+    threshold_pct: number
+    verified_tenants: number
+    unverified_tenants: number
+    total_tenants: number
+    suppressed_fields: string[]
+  }
   error?: string
 }
 
@@ -197,6 +204,12 @@ export default function DashboardPage() {
             : 'LOW') as 'LOW' | 'MEDIUM' | 'HIGH',
           arStatus: 'CURRENT' as const,
           arBalance: 0,
+          // COVE confidence fields from backend
+          confidencePct: t._confidence_pct ?? undefined,
+          coveStatus: (t._cove_status === 'VERIFIED' || t._cove_status === 'UNVERIFIED')
+            ? t._cove_status as 'VERIFIED' | 'UNVERIFIED'
+            : undefined,
+          passesSeenCount: t._passes_seen ?? undefined,
         }
       })
 
@@ -282,6 +295,7 @@ export default function DashboardPage() {
         level: l.level,
         timestamp: l.timestamp || new Date().toISOString(),
       })),
+      cove: result.cove ?? undefined,
     }
 
     setAnalysisData(transformed)

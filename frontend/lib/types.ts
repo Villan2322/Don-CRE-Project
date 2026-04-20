@@ -36,6 +36,13 @@ export interface DealAnalysis {
   leaseAbstracts: LeaseAbstract[]
   documents: UploadedDocument[]
   traceLog?: Array<{ stage: string; message: string; level: string; timestamp: string }>
+  cove?: {
+    threshold_pct: number
+    verified_tenants: number
+    unverified_tenants: number
+    total_tenants: number
+    suppressed_fields: string[]
+  }
 }
 
 export interface RedFlag {
@@ -64,6 +71,10 @@ export interface Tenant {
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   arStatus: 'CURRENT' | 'DELINQUENT' | 'AT_RISK'
   arBalance: number
+  // COVE confidence fields
+  confidencePct?: number
+  coveStatus?: 'VERIFIED' | 'UNVERIFIED'
+  passesSeenCount?: number
 }
 
 export interface LeaseAbstract {

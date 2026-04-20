@@ -92,9 +92,16 @@ interface DocumentUploadProps {
   onAnalysisComplete?: (result: AnalysisResult) => void
   traceLog?: Array<{ stage: string; message: string; level: string; timestamp: string }>
   tenantCount?: number
+  cove?: {
+    threshold_pct: number
+    verified_tenants: number
+    unverified_tenants: number
+    total_tenants: number
+    suppressed_fields: string[]
+  }
 }
 
-export function DocumentUpload({ onAnalysisComplete, traceLog, tenantCount = 0 }: DocumentUploadProps) {
+export function DocumentUpload({ onAnalysisComplete, traceLog, tenantCount = 0, cove }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
@@ -731,6 +738,7 @@ export function DocumentUpload({ onAnalysisComplete, traceLog, tenantCount = 0 }
         <PipelineTrace
           logs={traceLog as Array<{ stage: string; message: string; level: 'info' | 'success' | 'warning' | 'error'; timestamp: string }>}
           tenantCount={tenantCount}
+          cove={cove}
         />
       )}
     </div>
