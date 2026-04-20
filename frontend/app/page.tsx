@@ -80,9 +80,11 @@ interface AnalysisAPIResponse {
     severity?: string
     title?: string
     description?: string
+    message?: string  // Backend uses 'message' field
     issue?: string
     financial_impact?: number
     recommended_action?: string
+    recommendation?: string  // Backend uses 'recommendation' field
     action?: string
   }>
   what_to_get_next?: Array<string | { document?: string; why_needed?: string; priority?: number }>
@@ -106,10 +108,7 @@ export default function DashboardPage() {
 
   // Called when analysis completes - transform API response to DealAnalysis format
   const handleAnalysisComplete = useCallback((result: AnalysisAPIResponse) => {
-    console.log('[v0] handleAnalysisComplete called with:', result)
-    
     if (!result.success) {
-      console.log('[v0] Analysis failed:', result.error)
       return
     }
 
@@ -120,16 +119,15 @@ export default function DashboardPage() {
     const rsfRecoveryValue = result.rsf_recovery_annual_value ?? result.rsf_analysis?.recovery_opportunity?.annual_value ?? 0
     const propertyAppraiserSf = result.property_appraiser_sf ?? result.rsf_analysis?.reconciliation?.property_appraiser_sf ?? 0
 
-    console.log('[v0] Extracted values:', { scoreValue, tierValue, rsfRecoverySf, rsfRecoveryValue, propertyAppraiserSf })
-
     // Transform API response to match DealAnalysis type from lib/types.ts
+    // Backend uses 'message', frontend expects 'description'
     const redFlags: RedFlag[] = (result.red_flags || []).map((flag, i) => ({
       id: flag.id || `flag-${i}`,
       category: flag.category || 'General',
       severity: (flag.severity?.toUpperCase() === 'CRITICAL' ? 'HIGH' : flag.severity?.toUpperCase() || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
-      description: flag.description || flag.issue || 'No description',
-      impact: flag.financial_impact ? `$${flag.financial_impact.toLocaleString()} potential impact` : 'Unknown impact',
-      resolution: flag.recommended_action || flag.action || 'Review required',
+      description: flag.description || flag.message || flag.issue || 'No description provided',
+      impact: flag.financial_impact ? `$${flag.financial_impact.toLocaleString()} potential impact` : 'Review document for details',
+      resolution: flag.recommended_action || flag.recommendation || flag.action || 'Gather additional documentation',
     }))
 
     const tenants: Tenant[] = (result.tenants || []).map((t, i) => ({
@@ -222,8 +220,6 @@ export default function DashboardPage() {
       documents,
     }
 
-    console.log('[v0] Transformed analysis:', transformed)
-
     setAnalysisData(transformed)
     setHasRealData(true)
     // Auto-switch to snapshot tab to show results
@@ -249,6 +245,7 @@ export default function DashboardPage() {
           <TabContent 
             activeTab={activeTab} 
             deal={displayData}
+            hasRealData={hasRealData}
             onAnalysisComplete={handleAnalysisComplete}
           />
         </main>

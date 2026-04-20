@@ -240,12 +240,10 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         }
       }
       
-      console.log('[v0] Setting analysis result:', result)
       setAnalysisResult(result)
       
       // Call the callback to update parent state
       if (onAnalysisComplete) {
-        console.log('[v0] Calling onAnalysisComplete callback')
         onAnalysisComplete(result)
       }
 

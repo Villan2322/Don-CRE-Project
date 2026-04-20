@@ -15,13 +15,14 @@ import { DocumentUpload } from './document-upload'
 interface TabContentProps {
   activeTab: TabId
   deal: DealAnalysis
+  hasRealData?: boolean
   onAnalysisComplete?: (result: unknown) => void
 }
 
-export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {
+export function TabContent({ activeTab, deal, hasRealData = false, onAnalysisComplete }: TabContentProps) {
   switch (activeTab) {
     case 'snapshot':
-      return <SnapshotTab deal={deal} />
+      return <SnapshotTab deal={deal} hasRealData={hasRealData} />
     case 'audit':
       return <AuditTab deal={deal} />
     case 'rent-roll':
@@ -29,26 +30,26 @@ export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentPr
     case 'lease-audit':
       return <LeaseAuditTab deal={deal} />
     case 'risk':
-      return <RiskTab deal={deal} />
+      return <RiskTab deal={deal} hasRealData={hasRealData} />
     case 'abstracts':
       return <AbstractsTab deal={deal} />
     case 'upload':
       return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
     default:
-      return <SnapshotTab deal={deal} />
+      return <SnapshotTab deal={deal} hasRealData={hasRealData} />
   }
 }
 
-function SnapshotTab({ deal }: { deal: DealAnalysis }) {
+function SnapshotTab({ deal, hasRealData }: { deal: DealAnalysis; hasRealData?: boolean }) {
   return (
     <div className="space-y-6">
       <ScoreCard deal={deal} />
       {deal.rsfReconciliation.alertTriggered && <RSFAlert rsf={deal.rsfReconciliation} />}
       <MetricsGrid deal={deal} />
       <div className="grid gap-6 lg:grid-cols-3">
-        <ScoreHistoryChart />
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <ScoreHistoryChart hasRealData={hasRealData} currentScore={deal.score} />
+        <IncomeConcentrationChart tenants={deal.tenants} hasRealData={hasRealData} />
+        <WALTTimelineChart tenants={deal.tenants} hasRealData={hasRealData} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <RedFlagsList flags={deal.redFlags} limit={3} />
@@ -223,7 +224,7 @@ function LeaseAuditTab({ deal }: { deal: DealAnalysis }) {
   )
 }
 
-function RiskTab({ deal }: { deal: DealAnalysis }) {
+function RiskTab({ deal, hasRealData }: { deal: DealAnalysis; hasRealData?: boolean }) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-border bg-card p-6">
@@ -239,8 +240,8 @@ function RiskTab({ deal }: { deal: DealAnalysis }) {
         <WhatToGetNext items={deal.whatToGetNext} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <IncomeConcentrationChart tenants={deal.tenants} hasRealData={hasRealData} />
+        <WALTTimelineChart tenants={deal.tenants} hasRealData={hasRealData} />
       </div>
     </div>
   )

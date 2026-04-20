@@ -13,11 +13,35 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts'
-import { scoreHistory, incomeConcentration, waltTimeline } from '@/lib/mock-data'
+import type { Tenant } from '@/lib/types'
 
-export function ScoreHistoryChart() {
+interface ScoreHistoryProps {
+  hasRealData?: boolean
+  currentScore?: number
+}
+
+export function ScoreHistoryChart({ hasRealData, currentScore = 0 }: ScoreHistoryProps) {
+  // If we have real data, show single point with current score
+  // Otherwise show placeholder
+  const data = hasRealData 
+    ? [{ date: new Date().toISOString(), score: currentScore, docs: 1 }]
+    : []
+
+  if (!hasRealData || data.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4">
+          <h3 className="font-semibold">Score History</h3>
+          <p className="text-xs text-muted-foreground">Score progression as documents are added</p>
+        </div>
+        <div className="flex h-48 items-center justify-center text-muted-foreground">
+          <p className="text-sm">Upload more documents to see score history</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
@@ -26,7 +50,7 @@ export function ScoreHistoryChart() {
       </div>
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={scoreHistory}>
+          <AreaChart data={data}>
             <defs>
               <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="oklch(0.60 0.18 250)" stopOpacity={0.3} />
@@ -82,7 +106,49 @@ export function ScoreHistoryChart() {
   )
 }
 
-export function IncomeConcentrationChart() {
+interface IncomeConcentrationProps {
+  tenants?: Tenant[]
+  hasRealData?: boolean
+}
+
+const CHART_COLORS = [
+  'oklch(0.60 0.18 250)',
+  'oklch(0.65 0.18 280)',
+  'oklch(0.55 0.18 200)',
+  'oklch(0.60 0.15 320)',
+  'oklch(0.50 0.12 180)',
+]
+
+export function IncomeConcentrationChart({ tenants = [], hasRealData }: IncomeConcentrationProps) {
+  // Calculate income concentration from real tenant data
+  const totalRent = tenants.reduce((sum, t) => sum + (t.annualRent || 0), 0)
+  
+  const chartData = totalRent > 0 
+    ? tenants
+        .filter(t => t.annualRent > 0)
+        .sort((a, b) => b.annualRent - a.annualRent)
+        .slice(0, 5)
+        .map((t, i) => ({
+          name: t.name,
+          value: Math.round((t.annualRent / totalRent) * 100),
+          fill: CHART_COLORS[i % CHART_COLORS.length],
+        }))
+    : []
+
+  if (!hasRealData || chartData.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4">
+          <h3 className="font-semibold">Income Concentration</h3>
+          <p className="text-xs text-muted-foreground">Revenue distribution by tenant</p>
+        </div>
+        <div className="flex h-48 items-center justify-center text-muted-foreground">
+          <p className="text-sm text-center">No tenant rent data available.<br />Upload a rent roll to see distribution.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
@@ -93,7 +159,7 @@ export function IncomeConcentrationChart() {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={incomeConcentration}
+              data={chartData}
               cx="50%"
               cy="50%"
               innerRadius={50}
@@ -101,7 +167,7 @@ export function IncomeConcentrationChart() {
               paddingAngle={2}
               dataKey="value"
             >
-              {incomeConcentration.map((entry, index) => (
+              {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.fill} />
               ))}
             </Pie>
@@ -118,7 +184,7 @@ export function IncomeConcentrationChart() {
         </ResponsiveContainer>
       </div>
       <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-        {incomeConcentration.slice(0, 4).map((entry, index) => (
+        {chartData.slice(0, 4).map((entry, index) => (
           <div key={index} className="flex items-center gap-1.5 text-xs">
             <div className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.fill }} />
             <span className="text-muted-foreground">{entry.name}</span>
@@ -130,7 +196,50 @@ export function IncomeConcentrationChart() {
   )
 }
 
-export function WALTTimelineChart() {
+interface WALTTimelineProps {
+  tenants?: Tenant[]
+  hasRealData?: boolean
+}
+
+export function WALTTimelineChart({ tenants = [], hasRealData }: WALTTimelineProps) {
+  // Calculate lease expiry timeline from real tenant data
+  const now = new Date()
+  
+  const expiryData = tenants
+    .filter(t => t.leaseExpiry)
+    .map(t => {
+      const expiry = new Date(t.leaseExpiry!)
+      return {
+        tenant: t.name,
+        expiry,
+        rent: t.annualRent || 0,
+        monthsRemaining: t.monthsRemaining || Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30)),
+      }
+    })
+    .sort((a, b) => a.expiry.getTime() - b.expiry.getTime())
+    .slice(0, 5)
+
+  const chartData = expiryData.map(t => ({
+    month: t.expiry.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+    atRisk: t.rent,
+    secure: 0,
+    tenant: t.tenant,
+  }))
+
+  if (!hasRealData || chartData.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4">
+          <h3 className="font-semibold">Lease Expiry Timeline</h3>
+          <p className="text-xs text-muted-foreground">Income at risk over time</p>
+        </div>
+        <div className="flex h-48 items-center justify-center text-muted-foreground">
+          <p className="text-sm text-center">No lease expiry data available.<br />Upload leases to see timeline.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
@@ -139,7 +248,7 @@ export function WALTTimelineChart() {
       </div>
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={waltTimeline} layout="vertical">
+          <BarChart data={chartData} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.26 0 0)" horizontal={false} />
             <XAxis
               type="number"
@@ -163,10 +272,9 @@ export function WALTTimelineChart() {
                 borderRadius: '6px',
                 color: 'oklch(0.95 0 0)',
               }}
-              formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+              formatter={(value: number) => [`$${value.toLocaleString()}`, 'Annual Rent']}
             />
-            <Bar dataKey="atRisk" stackId="a" fill="oklch(0.55 0.22 25)" name="At Risk" />
-            <Bar dataKey="secure" stackId="a" fill="oklch(0.65 0.18 145)" name="Secure" />
+            <Bar dataKey="atRisk" fill="oklch(0.55 0.22 25)" name="At Risk" />
           </BarChart>
         </ResponsiveContainer>
       </div>
