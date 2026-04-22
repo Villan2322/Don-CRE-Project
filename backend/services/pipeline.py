@@ -1020,7 +1020,8 @@ class CREPipeline:
         The AI's job: write flags, score the deal, and recommend next steps.
         It cannot invent numbers because the numbers are already computed.
         """
-        doc_types = list({d.get("doc_type", "UNKNOWN") for d in documents})
+        doc_types      = list({d.get("doc_type", "UNKNOWN") for d in documents})
+        doc_filenames  = [d.get("filename", "") for d in documents]
         pa_sf     = recon["property_appraiser_sf"]
         gap_sf    = recon["rsf_gap_sf"]
         gap_val   = recon["rsf_gap_annual_value"]
@@ -1054,11 +1055,15 @@ class CREPipeline:
             f"Rent Roll Total SF: {total_sf:,.0f} SF\nNo PA SF provided — cannot calculate RSF gap"
         )
 
+        docs_present_block = "\n".join(f"  - {fn} ({dt})" for fn, dt in zip(doc_filenames, doc_types))
+
         prompt = f"""You are a commercial real estate deal analyst. Below are the VERIFIED reconciled numbers from the deal package "{deal_name}".
 These numbers were computed directly from the extracted document data. Do not change them.
 Your job: identify red flags, score the deal, and recommend what documents to get next.
 
-DOCUMENT TYPES PRESENT: {', '.join(doc_types)}
+DOCUMENTS ALREADY UPLOADED (do NOT recommend these — they are already present):
+{docs_present_block}
+
 TENANT COUNT: {n_tenants}
 WALT: {f"{walt:.1f} months" if walt else "Unknown"}
 TOTAL ANNUAL RENT: ${total_rent:,.0f}
@@ -1100,7 +1105,12 @@ RULES:
 - Every red flag MUST cite specific tenant names or dollar amounts from the roster above.
 - Do not flag "missing documents" unless you have a specific reason based on the data above.
 - Score deductions must be mathematically consistent with the data provided.
-- what_to_get_next must be specific (e.g. "Executed lease for Tenant X — needed to verify SF of 22,500" not "Lease documents")."""
+- what_to_get_next: ONLY recommend documents that are NOT already in the uploaded list above.
+  Each item must be specific to a gap found in THIS analysis — not a generic CRE checklist.
+  Examples of CORRECT items: "Executed lease for Tenant X — CoVe shows their SF is unverified at 22,500"
+  Examples of WRONG items: "Rent Roll", "Executed Leases", "Operating Statements" (generic, not analysis-driven)
+  If there are no gaps found, return an empty array [].
+  Maximum 5 items. Each item must name the specific gap it addresses."""
 
         response = await self.client.chat.completions.create(
             model=self.model,

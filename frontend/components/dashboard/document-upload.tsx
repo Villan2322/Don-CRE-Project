@@ -438,7 +438,7 @@ export function DocumentUpload({ onAnalysisComplete, traceLog, tenantCount = 0, 
               <div className="space-y-2">
                 <Label htmlFor="pa-sf">
                   Property Appraiser Total SF
-                  <span className="ml-1 text-xs text-muted-foreground">(Required)</span>
+                  <span className="ml-1 text-xs text-muted-foreground">(Optional)</span>
                 </Label>
                 <Input
                   id="pa-sf"
