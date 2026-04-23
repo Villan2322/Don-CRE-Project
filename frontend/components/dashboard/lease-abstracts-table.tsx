@@ -42,14 +42,19 @@ export function LeaseAbstractsTable({ abstracts }: LeaseAbstractsTableProps) {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[180px]">Tenant</TableHead>
+              <TableHead className="w-[160px]">Tenant</TableHead>
               <TableHead>Suite</TableHead>
+              <TableHead className="text-right">USF</TableHead>
               <TableHead className="text-right">RSF</TableHead>
+              <TableHead className="text-right">LF</TableHead>
               <TableHead>Commencement</TableHead>
               <TableHead>Expiration</TableHead>
               <TableHead className="text-right">Base Rent</TableHead>
               <TableHead>Escalation</TableHead>
               <TableHead>Expense</TableHead>
+              <TableHead>CAM Cap</TableHead>
+              <TableHead>Gross-Up</TableHead>
+              <TableHead>Fixed CAM</TableHead>
               <TableHead>Renewal</TableHead>
               <TableHead>Issues</TableHead>
             </TableRow>
@@ -59,8 +64,14 @@ export function LeaseAbstractsTable({ abstracts }: LeaseAbstractsTableProps) {
               <TableRow key={abstract.id}>
                 <TableCell className="font-medium">{abstract.tenantName}</TableCell>
                 <TableCell className="text-muted-foreground">{abstract.suite}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {abstract.usf ? abstract.usf.toLocaleString() : '—'}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {abstract.rsf.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-mono text-sm">
+                  {abstract.loadFactor != null ? abstract.loadFactor.toFixed(4) : '—'}
                 </TableCell>
                 <TableCell className="tabular-nums">
                   {formatDate(abstract.commencementDate)}
@@ -84,6 +95,29 @@ export function LeaseAbstractsTable({ abstracts }: LeaseAbstractsTableProps) {
                   <Badge variant="secondary" className="text-xs">
                     {expenseLabels[abstract.expenseStructure]}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-xs">
+                  {abstract.camCap != null ? (
+                    <span className="text-warning font-medium">{abstract.camCap}%</span>
+                  ) : (
+                    <span className="text-muted-foreground italic">None</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {abstract.camGrossUp ? (
+                    <span className="text-success font-medium">
+                      Yes {abstract.grossUpThreshold != null ? `(${abstract.grossUpThreshold}%)` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {abstract.fixedCAM ? (
+                    <Badge variant="secondary" className="text-xs">Fixed</Badge>
+                  ) : (
+                    <span className="text-muted-foreground">Reconciling</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-sm">
                   {abstract.renewalOptions ? (

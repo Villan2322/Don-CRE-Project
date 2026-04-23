@@ -10,6 +10,7 @@ import {
   FileStack,
   Upload,
   Clock,
+  Calculator,
 } from 'lucide-react'
 import { TabId } from '@/lib/types'
 
@@ -23,6 +24,7 @@ const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'audit', label: 'Audit Log', icon: AlertTriangle },
   { id: 'rent-roll', label: 'Rent Roll', icon: Table2 },
   { id: 'lease-audit', label: 'Lease Audit', icon: FileText },
+  { id: 'cam', label: 'CAM Reconciliation', icon: Calculator },
   { id: 'risk', label: 'Risk Dashboard', icon: Shield },
   { id: 'abstracts', label: 'Lease Abstracts', icon: FileStack },
 ]

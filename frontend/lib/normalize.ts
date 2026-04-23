@@ -6,6 +6,7 @@
 import type { AnalysisResult } from './api'
 import type {
   DealAnalysis,
+  CAMReconciliation,
   RedFlag,
   Tenant,
   LeaseAbstract,
@@ -96,11 +97,19 @@ export function normalizeAnalysisResult(result: AnalysisResult): DealAnalysis {
     const riskLevel: Tenant['riskLevel'] =
       riskStr === 'HIGH' ? 'HIGH' : riskStr === 'MEDIUM' ? 'MEDIUM' : 'LOW'
 
+    const rsf_ = t.rsf_rent_roll ?? t.rsf ?? 0
+    const usf_ = t.usf ?? rsf_ / 1.15
+    const loadFactor_ = usf_ > 0 ? rsf_ / usf_ : 1.0
+
     return {
       id: t.tenant_id ?? `tenant-${i}`,
       name: t.tenant_name ?? 'Unknown',
       suite: t.suite ?? '',
-      rsf: t.rsf_rent_roll ?? 0,
+      usf: usf_,
+      rsf: rsf_,
+      loadFactor: Math.round(loadFactor_ * 10000) / 10000,
+      leaseLoadFactor: t.lease_load_factor ?? t.load_factor ?? null,
+      proRataShare: t.pro_rata_share ?? 0,
       bomaRsf: t.rsf_boma ?? undefined,
       rsfDelta: t.rsf_variance ?? undefined,
       monthlyRent: t.monthly_rent ?? 0,
@@ -129,20 +138,33 @@ export function normalizeAnalysisResult(result: AnalysisResult): DealAnalysis {
           ? 'GROSS'
           : 'NNN'
 
+      const laRsf = la.rsf ?? 0
+      const laUsf = la.usf ?? laRsf / 1.15
+
       return {
         id: la.lease_id ?? `la-${i}`,
         tenantName: la.tenant_name ?? 'Unknown',
         suite: la.suite ?? '',
-        rsf: la.rsf ?? 0,
+        usf: laUsf,
+        rsf: laRsf,
+        loadFactor: la.load_factor ?? null,
         commencementDate: la.lease_start ?? '',
         expirationDate: la.lease_end ?? null,
         baseRent: la.annual_base_rent ?? 0,
         escalation: la.rent_escalation ?? 'None specified',
         expenseStructure,
-        camCap: null,
+        camCap: la.cam_cap ?? null,
+        camGrossUp: la.cam_gross_up ?? false,
+        grossUpThreshold: la.gross_up_threshold ?? null,
+        expenseExclusions: la.expense_exclusions ?? [],
+        mgmtFeeCap: la.mgmt_fee_cap ?? null,
+        baseYear: la.base_year ?? null,
+        fixedCAM: la.fixed_cam ?? false,
+        controllableCamCap: la.controllable_cam_cap ?? null,
+        anchorExclusion: la.anchor_exclusion ?? false,
         renewalOptions: la.renewal_options ?? null,
         tiAllowance: la.tenant_improvements ?? null,
-        remeasurementRights: false,
+        remeasurementRights: la.remeasurement_rights ?? false,
         missingFields: la.missing_fields ?? [],
       }
     }
@@ -169,6 +191,20 @@ export function normalizeAnalysisResult(result: AnalysisResult): DealAnalysis {
       status: docStatusMap(d.status ?? 'completed'),
     })
   )
+
+  // CAM reconciliation — pass through if already assembled by the route
+  const rawResult = result as unknown as Record<string, unknown>
+  const emptyCam: CAMReconciliation = {
+    totalRecoverableExpenses: 0,
+    buildingTotalRSF: 0,
+    tenantCAMSummary: [],
+    totalBilled: 0,
+    totalOwed: 0,
+    overUnderCollection: 0,
+    expenseCategories: [],
+  }
+  const camReconciliation: CAMReconciliation =
+    (rawResult.camReconciliation as CAMReconciliation) ?? emptyCam
 
   // WALT: calculate from tenants if not in summary
   const waltMonths =
@@ -209,6 +245,7 @@ export function normalizeAnalysisResult(result: AnalysisResult): DealAnalysis {
       arDelinquency: 0,
     },
     walt: waltMonths,
+    camReconciliation,
     redFlags,
     whatToGetNext: result.what_to_get_next ?? [],
     tenants,

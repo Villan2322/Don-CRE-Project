@@ -11,6 +11,7 @@ import { TenantTable } from './tenant-table'
 import { LeaseAbstractsTable } from './lease-abstracts-table'
 import { DocumentsList } from './documents-list'
 import { DocumentUpload } from './document-upload'
+import { CAMReconciliationTab } from './cam-reconciliation-tab'
 
 interface TabContentProps {
   activeTab: TabId
@@ -28,6 +29,8 @@ export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentPr
       return <RentRollTab deal={deal} />
     case 'lease-audit':
       return <LeaseAuditTab deal={deal} />
+    case 'cam':
+      return <CAMReconciliationTab cam={deal.camReconciliation} />
     case 'risk':
       return <RiskTab deal={deal} />
     case 'abstracts':
