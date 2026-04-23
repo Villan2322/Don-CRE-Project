@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import {
   Upload,
@@ -16,18 +18,26 @@ import {
   X,
   Play,
   Trash2,
+  Ruler,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { DealAnalysis } from '@/lib/types'
 
 interface UploadedFile {
-  id: string            // client-side UUID, used only for React keys
-  documentId?: string   // real backend document_id returned after upload
+  id: string
+  documentId?: string
   file: File
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
   progress: number
   documentType?: string
   error?: string
+}
+
+interface KnownSF {
+  bomaSF: string
+  rentRollSF: string
+  leaseSF: string
+  dealName: string
 }
 
 interface DocumentUploadProps {
@@ -39,6 +49,12 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [knownSF, setKnownSF] = useState<KnownSF>({
+    bomaSF: '',
+    rentRollSF: '',
+    leaseSF: '',
+    dealName: '',
+  })
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -78,9 +94,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         body: formData,
       })
 
-      if (!response.ok) {
-        throw new Error('Upload failed')
-      }
+      if (!response.ok) throw new Error('Upload failed')
 
       const result = await response.json()
 
@@ -97,7 +111,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             : f
         )
       )
-    } catch (error) {
+    } catch {
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadedFile.id
@@ -120,7 +134,6 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     setAnalysisError(null)
 
     try {
-      // Use real backend document_ids (not client-side UUIDs)
       const backendDocIds = files
         .filter((f) => f.status === 'completed' && f.documentId)
         .map((f) => f.documentId as string)
@@ -134,7 +147,16 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deal_id: dealId, documents: backendDocIds }),
+        body: JSON.stringify({
+          deal_id: dealId,
+          documents: backendDocIds,
+          known_sf: {
+            boma_sf: knownSF.bomaSF ? Number(knownSF.bomaSF.replace(/,/g, '')) : null,
+            rent_roll_sf: knownSF.rentRollSF ? Number(knownSF.rentRollSF.replace(/,/g, '')) : null,
+            lease_sf: knownSF.leaseSF ? Number(knownSF.leaseSF.replace(/,/g, '')) : null,
+          },
+          deal_name: knownSF.dealName || undefined,
+        }),
       })
 
       if (!response.ok) {
@@ -150,8 +172,8 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
       setAnalysisComplete(true)
       onAnalysisComplete?.(result.result as DealAnalysis)
-    } catch (err: any) {
-      setAnalysisError(err.message ?? 'An unexpected error occurred')
+    } catch (err: unknown) {
+      setAnalysisError(err instanceof Error ? err.message : 'An unexpected error occurred')
     } finally {
       setIsAnalyzing(false)
     }
@@ -164,15 +186,13 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const clearAll = () => {
     setFiles([])
     setAnalysisComplete(false)
+    setAnalysisError(null)
   }
 
   const getFileIcon = (filename: string) => {
-    if (filename.endsWith('.pdf')) {
-      return <FileText className="h-5 w-5 text-red-400" />
-    }
-    if (filename.endsWith('.xlsx') || filename.endsWith('.xls') || filename.endsWith('.csv')) {
+    if (filename.endsWith('.pdf')) return <FileText className="h-5 w-5 text-red-400" />
+    if (filename.endsWith('.xlsx') || filename.endsWith('.xls') || filename.endsWith('.csv'))
       return <FileSpreadsheet className="h-5 w-5 text-green-400" />
-    }
     return <FileText className="h-5 w-5 text-muted-foreground" />
   }
 
@@ -210,9 +230,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             {...getRootProps()}
             className={cn(
               'flex cursor-pointer flex-col items-center justify-center rounded-lg p-12 text-center transition-colors',
-              isDragActive
-                ? 'bg-primary/10 border-primary'
-                : 'hover:bg-muted/50'
+              isDragActive ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50'
             )}
           >
             <input {...getInputProps()} />
@@ -222,12 +240,63 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <p className="text-lg font-medium text-foreground">
               {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              or click to browse your computer
-            </p>
+            <p className="mt-1 text-sm text-muted-foreground">or click to browse your computer</p>
             <p className="mt-4 text-xs text-muted-foreground">
               Supported formats: PDF, XLSX, XLS, CSV
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Known Square Footage */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Ruler className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Known Square Footage</CardTitle>
+          </div>
+          <CardDescription>
+            Enter any SF figures you already know. These seed the RSF reconciliation and improve accuracy — leave blank to let the AI extract them from your documents.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="deal-name">Deal Name</Label>
+              <Input
+                id="deal-name"
+                placeholder="e.g. Town & Country Plaza"
+                value={knownSF.dealName}
+                onChange={(e) => setKnownSF((prev) => ({ ...prev, dealName: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="boma-sf">BOMA / Measured SF</Label>
+              <Input
+                id="boma-sf"
+                placeholder="e.g. 125,000"
+                value={knownSF.bomaSF}
+                onChange={(e) => setKnownSF((prev) => ({ ...prev, bomaSF: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rent-roll-sf">Rent Roll Total SF</Label>
+              <Input
+                id="rent-roll-sf"
+                placeholder="e.g. 124,200"
+                value={knownSF.rentRollSF}
+                onChange={(e) => setKnownSF((prev) => ({ ...prev, rentRollSF: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lease-sf">Executed Lease SF</Label>
+              <Input
+                id="lease-sf"
+                placeholder="e.g. 123,800"
+                value={knownSF.leaseSF}
+                onChange={(e) => setKnownSF((prev) => ({ ...prev, leaseSF: e.target.value }))}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -261,8 +330,8 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                     <FileText className="h-4 w-4 text-red-400" />
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{doc.name}</p>
                   <p className="text-xs text-muted-foreground">{doc.format}</p>
                 </div>
                 {doc.required && (
@@ -281,9 +350,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-base">Uploaded Files</CardTitle>
-                <CardDescription>
-                  {completedCount} of {files.length} files ready
-                </CardDescription>
+                <CardDescription>{completedCount} of {files.length} files ready</CardDescription>
               </div>
               <div className="flex items-center gap-2">
                 {pendingCount > 0 && (
@@ -307,9 +374,9 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                   className="flex items-center gap-4 rounded-md border border-border bg-card p-3"
                 >
                   {getFileIcon(uploadedFile.file.name)}
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="truncate text-sm font-medium text-foreground">
                         {uploadedFile.file.name}
                       </p>
                       {getStatusBadge(uploadedFile.status)}
@@ -328,11 +395,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                   </div>
                   <div className="flex items-center gap-2">
                     {uploadedFile.status === 'pending' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => uploadFile(uploadedFile)}
-                      >
+                      <Button size="sm" variant="ghost" onClick={() => uploadFile(uploadedFile)}>
                         <Upload className="h-4 w-4" />
                       </Button>
                     )}
@@ -342,11 +405,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                     {uploadedFile.status === 'error' && (
                       <AlertCircle className="h-5 w-5 text-destructive" />
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeFile(uploadedFile.id)}
-                    >
+                    <Button size="sm" variant="ghost" onClick={() => removeFile(uploadedFile.id)}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -364,7 +423,10 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <div>
               <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
               <p className="text-sm text-muted-foreground">
-                {completedCount} documents ready for AI-powered analysis
+                {completedCount} document{completedCount !== 1 ? 's' : ''} ready
+                {knownSF.bomaSF || knownSF.rentRollSF || knownSF.leaseSF
+                  ? ' · SF figures provided'
+                  : ' · SF will be extracted from documents'}
               </p>
               {analysisError && (
                 <p className="mt-2 text-sm text-destructive">{analysisError}</p>
@@ -408,33 +470,15 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         <CardContent>
           <div className="space-y-4">
             {[
-              {
-                name: 'Document Classification',
-                description: 'Automatically identifies document types and extracts metadata',
-              },
-              {
-                name: 'Lease Abstraction',
-                description: 'Extracts 40+ key terms from lease documents',
-              },
-              {
-                name: 'Rent Roll Analysis',
-                description: 'Parses and normalizes tenant data, calculates metrics',
-              },
-              {
-                name: 'RSF Reconciliation',
-                description: 'Cross-references square footage across all sources',
-              },
-              {
-                name: 'Red Flag Detection',
-                description: 'Identifies risks, discrepancies, and issues',
-              },
-              {
-                name: 'Deal Scoring',
-                description: 'Generates comprehensive 0-100 deal score',
-              },
+              { name: 'Document Classification', description: 'Automatically identifies document types and extracts metadata' },
+              { name: 'Lease Abstraction', description: 'Extracts 40+ key terms from lease documents' },
+              { name: 'Rent Roll Analysis', description: 'Parses and normalizes tenant data, calculates metrics' },
+              { name: 'RSF Reconciliation', description: 'Cross-references square footage across all sources' },
+              { name: 'Red Flag Detection', description: 'Identifies risks, discrepancies, and issues' },
+              { name: 'Deal Scoring', description: 'Generates comprehensive 0-100 deal score' },
             ].map((agent, index) => (
               <div key={agent.name} className="flex items-start gap-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
                   {index + 1}
                 </div>
                 <div>

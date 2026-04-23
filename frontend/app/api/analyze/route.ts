@@ -134,8 +134,13 @@ function safeNum(v: unknown, fallback = 0): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { deal_id: string; documents: string[] }
-    const { deal_id, documents: docIds } = body
+    const body = await req.json() as {
+      deal_id: string
+      documents: string[]
+      known_sf?: { boma_sf?: number | null; rent_roll_sf?: number | null; lease_sf?: number | null }
+      deal_name?: string
+    }
+    const { deal_id, documents: docIds, known_sf, deal_name } = body
 
     if (!deal_id || !docIds?.length) {
       return NextResponse.json({ detail: 'deal_id and documents are required' }, { status: 400 })
@@ -169,7 +174,20 @@ export async function POST(req: NextRequest) {
     const summary = rentRoll.summary ?? {}
     const dealScore = (risk.deal_score ?? {}) as Record<string, unknown>
     const subScores = (dealScore.sub_scores ?? {}) as Record<string, number>
-    const reconciliation = rsf.reconciliation ?? {}
+
+    // Merge known_sf overrides into AI-extracted reconciliation
+    const reconciliation = { ...(rsf.reconciliation ?? {}) }
+    if (known_sf?.boma_sf) reconciliation.total_rsf_boma = known_sf.boma_sf
+    if (known_sf?.rent_roll_sf) reconciliation.total_rsf_rent_roll = known_sf.rent_roll_sf
+    if (known_sf?.lease_sf) reconciliation.total_rsf_leases = known_sf.lease_sf
+
+    // Recalculate variance using any overridden values
+    const bomaVal = safeNum(reconciliation.total_rsf_boma)
+    const rrVal = safeNum(reconciliation.total_rsf_rent_roll)
+    if (bomaVal && rrVal) {
+      reconciliation.variance_rent_roll_vs_boma = rrVal - bomaVal
+      reconciliation.variance_percentage = bomaVal > 0 ? ((rrVal - bomaVal) / bomaVal) * 100 : 0
+    }
 
     // Build tenants list
     const tenants = (rentRoll.tenants as Array<Record<string, unknown>>).map((t, i) => {
@@ -279,7 +297,7 @@ export async function POST(req: NextRequest) {
     } = {
       // Raw AnalysisResult fields (for normalize.ts compatibility)
       deal_id,
-      property_name: docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis',
+      property_name: deal_name || docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis',
       property_address: '',
       analysis_date: new Date().toISOString(),
       deal_score: {
@@ -305,7 +323,7 @@ export async function POST(req: NextRequest) {
       financial_summary: summary,
 
       // Flattened DealAnalysis-shaped fields (consumed directly by normalize.ts)
-      dealName: docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis',
+      dealName: deal_name || docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis',
       submittedAt: new Date().toISOString(),
       score: overallScore,
       tier,
