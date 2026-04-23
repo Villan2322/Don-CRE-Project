@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { DealAnalysis } from '@/lib/types'
+import { AgentTrace } from './agent-trace'
 
 interface UploadedFile {
   id: string
@@ -49,6 +50,12 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [traceConfig, setTraceConfig] = useState<{
+    dealId: string
+    documentIds: string[]
+    knownSf: { boma_sf?: number | null; rent_roll_sf?: number | null; lease_sf?: number | null }
+    dealName?: string
+  } | null>(null)
   const [knownSF, setKnownSF] = useState<KnownSF>({
     bomaSF: '',
     rentRollSF: '',
@@ -129,54 +136,41 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     }
   }
 
-  const runAnalysis = async () => {
-    setIsAnalyzing(true)
+  const runAnalysis = () => {
     setAnalysisError(null)
 
-    try {
-      const backendDocIds = files
-        .filter((f) => f.status === 'completed' && f.documentId)
-        .map((f) => f.documentId as string)
+    const backendDocIds = files
+      .filter((f) => f.status === 'completed' && f.documentId)
+      .map((f) => f.documentId as string)
 
-      if (backendDocIds.length === 0) {
-        throw new Error('No successfully uploaded documents found')
-      }
-
-      const dealId = crypto.randomUUID()
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deal_id: dealId,
-          documents: backendDocIds,
-          known_sf: {
-            boma_sf: knownSF.bomaSF ? Number(knownSF.bomaSF.replace(/,/g, '')) : null,
-            rent_roll_sf: knownSF.rentRollSF ? Number(knownSF.rentRollSF.replace(/,/g, '')) : null,
-            lease_sf: knownSF.leaseSF ? Number(knownSF.leaseSF.replace(/,/g, '')) : null,
-          },
-          deal_name: knownSF.dealName || undefined,
-        }),
-      })
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: 'Analysis failed' }))
-        throw new Error(err.detail || 'Analysis failed')
-      }
-
-      const result = await response.json()
-
-      if (result.status === 'failed') {
-        throw new Error(result.message || 'Analysis failed')
-      }
-
-      setAnalysisComplete(true)
-      onAnalysisComplete?.(result.result as DealAnalysis)
-    } catch (err: unknown) {
-      setAnalysisError(err instanceof Error ? err.message : 'An unexpected error occurred')
-    } finally {
-      setIsAnalyzing(false)
+    if (backendDocIds.length === 0) {
+      setAnalysisError('No successfully uploaded documents found')
+      return
     }
+
+    setIsAnalyzing(true)
+    setTraceConfig({
+      dealId: crypto.randomUUID(),
+      documentIds: backendDocIds,
+      knownSf: {
+        boma_sf: knownSF.bomaSF ? Number(knownSF.bomaSF.replace(/,/g, '')) : null,
+        rent_roll_sf: knownSF.rentRollSF ? Number(knownSF.rentRollSF.replace(/,/g, '')) : null,
+        lease_sf: knownSF.leaseSF ? Number(knownSF.leaseSF.replace(/,/g, '')) : null,
+      },
+      dealName: knownSF.dealName || undefined,
+    })
+  }
+
+  const handleTraceComplete = (result: DealAnalysis) => {
+    setIsAnalyzing(false)
+    setAnalysisComplete(true)
+    onAnalysisComplete?.(result)
+  }
+
+  const handleTraceError = (message: string) => {
+    setIsAnalyzing(false)
+    setAnalysisError(message)
+    setTraceConfig(null)
   }
 
   const removeFile = (id: string) => {
@@ -457,6 +451,18 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             </Button>
           </CardContent>
         </Card>
+      )}
+
+      {/* Live Agent Trace */}
+      {traceConfig && (
+        <AgentTrace
+          dealId={traceConfig.dealId}
+          documentIds={traceConfig.documentIds}
+          knownSf={traceConfig.knownSf}
+          dealName={traceConfig.dealName}
+          onComplete={handleTraceComplete}
+          onError={handleTraceError}
+        />
       )}
 
       {/* Analysis Pipeline Info */}
