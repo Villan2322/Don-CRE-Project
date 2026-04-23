@@ -15,7 +15,7 @@ import { DocumentUpload } from './document-upload'
 interface TabContentProps {
   activeTab: TabId
   deal: DealAnalysis
-  onAnalysisComplete?: (dealId: string) => void
+  onAnalysisComplete?: (result: DealAnalysis) => void
 }
 
 export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {

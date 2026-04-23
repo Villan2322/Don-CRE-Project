@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { DealAnalysis } from '@/lib/types'
 
 interface UploadedFile {
   id: string            // client-side UUID, used only for React keys
@@ -30,7 +31,7 @@ interface UploadedFile {
 }
 
 interface DocumentUploadProps {
-  onAnalysisComplete?: (dealId: string) => void
+  onAnalysisComplete?: (result: DealAnalysis) => void
 }
 
 export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
@@ -148,7 +149,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       }
 
       setAnalysisComplete(true)
-      onAnalysisComplete?.(dealId)
+      onAnalysisComplete?.(result.result as DealAnalysis)
     } catch (err: any) {
       setAnalysisError(err.message ?? 'An unexpected error occurred')
     } finally {
