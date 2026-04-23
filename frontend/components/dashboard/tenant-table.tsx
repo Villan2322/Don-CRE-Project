@@ -39,9 +39,13 @@ export function TenantTable({ tenants }: TenantTableProps) {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[180px]">Tenant</TableHead>
+              <TableHead className="w-[160px]">Tenant</TableHead>
               <TableHead>Suite</TableHead>
+              <TableHead className="text-right">USF</TableHead>
               <TableHead className="text-right">RSF</TableHead>
+              <TableHead className="text-right">LF (Implied)</TableHead>
+              <TableHead className="text-right">LF (Lease)</TableHead>
+              <TableHead className="text-right">Pro-Rata %</TableHead>
               <TableHead className="text-right">BOMA RSF</TableHead>
               <TableHead className="text-right">Delta</TableHead>
               <TableHead className="text-right">Rent/SF</TableHead>
@@ -57,8 +61,26 @@ export function TenantTable({ tenants }: TenantTableProps) {
               <TableRow key={tenant.id}>
                 <TableCell className="font-medium">{tenant.name}</TableCell>
                 <TableCell className="text-muted-foreground">{tenant.suite}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {tenant.usf ? Math.round(tenant.usf).toLocaleString() : '—'}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {tenant.rsf.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-mono text-sm">
+                  {tenant.loadFactor != null ? tenant.loadFactor.toFixed(4) : '—'}
+                </TableCell>
+                <TableCell className={cn(
+                  'text-right tabular-nums font-mono text-sm',
+                  tenant.leaseLoadFactor != null && tenant.loadFactor != null &&
+                  Math.abs(tenant.leaseLoadFactor - tenant.loadFactor) > 0.01
+                    ? 'text-warning'
+                    : ''
+                )}>
+                  {tenant.leaseLoadFactor != null ? tenant.leaseLoadFactor.toFixed(4) : '—'}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-sm">
+                  {tenant.proRataShare != null ? `${(tenant.proRataShare * 100).toFixed(2)}%` : '—'}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {tenant.bomaRsf?.toLocaleString() ?? '—'}
