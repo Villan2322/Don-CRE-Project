@@ -315,12 +315,18 @@ export async function POST(req: NextRequest) {
 
   const docs = docIds.map((id) => store.documents.get(id)).filter(Boolean)
   if (!docs.length) {
+    console.error('[v0] stream: no documents found in store for IDs:', docIds)
     return new Response(JSON.stringify({ detail: 'No documents found for provided IDs' }), { status: 400 })
   }
+
+  console.log('[v0] stream: OPENROUTER_API_KEY set:', !!process.env.OPENROUTER_API_KEY)
+  console.log('[v0] stream: found', docs.length, 'document(s):', docs.map((d) => `${d!.filename} (${d!.content?.length ?? 0} chars)`))
 
   const allText = docs
     .map((d) => `=== ${d!.filename} (${d!.document_type}) ===\n${d!.content}`)
     .join('\n\n')
+
+  console.log('[v0] stream: total allText length:', allText.length, 'chars')
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -354,6 +360,8 @@ export async function POST(req: NextRequest) {
             })
           } catch (err) {
             const completedAt = Date.now()
+            const errMsg = err instanceof Error ? err.message : String(err)
+            console.error(`[v0] stream: agent "${agent.id}" failed:`, errMsg)
             results[agent.id] = null
             emit({
               type: 'agent_error',
@@ -363,7 +371,7 @@ export async function POST(req: NextRequest) {
               startedAt,
               completedAt,
               durationMs: completedAt - startedAt,
-              error: err instanceof Error ? err.message : String(err),
+              error: errMsg,
             })
           }
         }

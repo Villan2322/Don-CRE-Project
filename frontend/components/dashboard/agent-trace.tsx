@@ -45,8 +45,13 @@ const AGENT_ORDER: { id: string; name: string; description: string }[] = [
   },
   {
     id: 'rsf_reconciliation',
-    name: 'RSF Reconciliation',
-    description: 'Cross-checks SF across rent roll, leases, and BOMA',
+    name: 'RSF & Load Factor Reconciliation',
+    description: 'Cross-checks SF and load factors across rent roll, leases, and BOMA',
+  },
+  {
+    id: 'cam_reconciliation',
+    name: 'CAM Reconciliation',
+    description: 'Pro-rata shares, recoverable expenses, over/under-collection position',
   },
   {
     id: 'red_flag',
@@ -127,7 +132,9 @@ function AgentRowItem({ row, index }: { row: AgentRow; index: number }) {
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{row.description}</p>
           {row.status === 'error' && row.error && (
-            <p className="mt-1 text-xs text-destructive">{row.error}</p>
+            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+              <p className="font-mono text-xs text-destructive break-all">{row.error}</p>
+            </div>
           )}
         </div>
 
