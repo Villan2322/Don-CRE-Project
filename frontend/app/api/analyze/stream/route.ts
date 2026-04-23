@@ -4,7 +4,11 @@ import { extractJSON } from '@/lib/ai-client'
 
 // ─── Agent definitions ────────────────────────────────────────────────────────
 
-const AGENTS = [
+type AgentDef =
+  | { id: string; name: string; description: string; skipInStream: true }
+  | { id: string; name: string; description: string; skipInStream?: false; prompt: string }
+
+const AGENTS: AgentDef[] = [
   {
     id: 'classifier',
     name: 'Document Classifier',
@@ -334,7 +338,8 @@ export async function POST(req: NextRequest) {
           emit({ type: 'agent_start', agentId: agent.id, agentName: agent.name, description: agent.description, startedAt })
 
           try {
-            const output = await extractJSON(agent.prompt, allText)
+            const agentWithPrompt = agent as Extract<AgentDef, { prompt: string }>
+          const output = await extractJSON(agentWithPrompt.prompt, allText)
             const completedAt = Date.now()
             results[agent.id] = output
             emit({
@@ -413,7 +418,7 @@ export async function POST(req: NextRequest) {
               ? Math.max(0, Math.round((new Date(safeStr(t.lease_end)).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30)))
               : null,
             incomeConcentration: 0,
-            riskLevel:         'LOW' as const,
+            riskLevel:         'LOW' as 'LOW' | 'MEDIUM' | 'HIGH',
             arStatus:          (['CURRENT', 'DELINQUENT', 'AT_RISK'].includes(safeStr(t.ar_status).toUpperCase())
               ? safeStr(t.ar_status).toUpperCase() : 'CURRENT') as 'CURRENT' | 'DELINQUENT' | 'AT_RISK',
             arBalance:         safeNum(t.ar_balance),
@@ -532,7 +537,7 @@ export async function POST(req: NextRequest) {
           : overallScore >= 90 ? 'GREEN' : overallScore >= 75 ? 'YELLOW' : overallScore >= 60 ? 'ORANGE' : 'RED'
         ) as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'
 
-        const propertyName = deal_name || docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis'
+        const propertyName = deal_name || (docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis')
 
         const result = {
           deal_id,

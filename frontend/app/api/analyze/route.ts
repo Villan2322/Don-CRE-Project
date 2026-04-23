@@ -322,7 +322,7 @@ export async function POST(req: NextRequest) {
           ? Math.max(0, Math.round((new Date(safeStr(t.lease_end)).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30)))
           : null,
         incomeConcentration: 0,
-        riskLevel: 'LOW' as const,
+        riskLevel: 'LOW' as 'LOW' | 'MEDIUM' | 'HIGH',
         arStatus: (['CURRENT', 'DELINQUENT', 'AT_RISK'].includes(safeStr(t.ar_status).toUpperCase())
           ? safeStr(t.ar_status).toUpperCase()
           : 'CURRENT') as 'CURRENT' | 'DELINQUENT' | 'AT_RISK',
@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
       : overallScore >= 60 ? 'ORANGE'
       : 'RED') as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'
 
-    const propertyName = deal_name || docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis'
+    const propertyName = deal_name || (docs[0]?.filename.replace(/\.[^.]+$/, '') ?? 'Property Analysis')
 
     const result = {
       // Raw shape for store compatibility
