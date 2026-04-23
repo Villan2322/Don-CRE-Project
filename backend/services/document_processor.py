@@ -207,33 +207,140 @@ class DocumentProcessor:
         )
         
         # Build result
-        from ..models.schemas import DealScore, RSFReconciliation, RedFlag
-        
+        from ..models.schemas import DealScore, RSFReconciliation, RedFlag, TenantRecord, LeaseAbstract, Severity
+
+        # --- Map tenants from rent roll ---
+        tenant_records: list[TenantRecord] = []
+        for t in rent_roll_analysis.get("tenants", []):
+            try:
+                # Calculate days to expiry
+                from datetime import date as date_type
+                lease_end_str = t.get("lease_end") or t.get("expiry_date") or ""
+                try:
+                    lease_end_date = date_type.fromisoformat(str(lease_end_str)[:10])
+                    days_to_expiry = max((lease_end_date - date_type.today()).days, 0)
+                except Exception:
+                    lease_end_date = date_type(2025, 12, 31)
+                    days_to_expiry = 0
+
+                lease_start_str = t.get("lease_start") or t.get("commencement_date") or ""
+                try:
+                    lease_start_date = date_type.fromisoformat(str(lease_start_str)[:10])
+                except Exception:
+                    lease_start_date = date_type(2020, 1, 1)
+
+                monthly_rent = float(t.get("monthly_rent", 0) or 0)
+                annual_rent = float(t.get("annual_rent", monthly_rent * 12) or 0)
+                rsf = float(t.get("rsf", 1) or 1)
+                rent_psf = float(t.get("rent_psf", annual_rent / rsf if rsf else 0) or 0)
+
+                tenant_records.append(TenantRecord(
+                    tenant_id=str(uuid.uuid4()),
+                    tenant_name=str(t.get("tenant_name", "Unknown")),
+                    suite=str(t.get("suite", "")),
+                    rsf_rent_roll=rsf,
+                    monthly_rent=monthly_rent,
+                    annual_rent=annual_rent,
+                    rent_psf=rent_psf,
+                    lease_start=lease_start_date,
+                    lease_end=lease_end_date,
+                    days_to_expiry=days_to_expiry,
+                    has_renewal_option=bool(t.get("renewal_option", False)),
+                    risk_level=Severity.LOW,
+                ))
+            except Exception:
+                continue
+
+        # --- Map lease abstracts ---
+        lease_abstract_records: list[LeaseAbstract] = []
+        for idx, la in enumerate(lease_abstracts):
+            try:
+                from datetime import date as date_type
+                ls_str = la.get("lease_start") or ""
+                le_str = la.get("lease_end") or ""
+                try:
+                    ls_date = date_type.fromisoformat(str(ls_str)[:10])
+                except Exception:
+                    ls_date = date_type(2020, 1, 1)
+                try:
+                    le_date = date_type.fromisoformat(str(le_str)[:10])
+                except Exception:
+                    le_date = date_type(2025, 12, 31)
+
+                lease_abstract_records.append(LeaseAbstract(
+                    lease_id=f"LA-{idx+1:03d}",
+                    tenant_name=str(la.get("tenant_name", "Unknown")),
+                    suite=str(la.get("suite", "")),
+                    rsf=float(la.get("rsf", 0) or 0),
+                    lease_start=ls_date,
+                    lease_end=le_date,
+                    base_rent_psf=float(la.get("base_rent_psf", 0) or 0),
+                    annual_base_rent=float(la.get("annual_base_rent", 0) or 0),
+                    rent_escalation=la.get("rent_escalation"),
+                    expense_structure=la.get("expense_structure"),
+                    renewal_options=la.get("renewal_options"),
+                    termination_rights=la.get("termination_rights"),
+                    tenant_improvements=la.get("tenant_improvements"),
+                    free_rent_months=la.get("free_rent_months"),
+                    security_deposit=la.get("security_deposit"),
+                    guarantor=la.get("guarantor"),
+                    permitted_use=la.get("permitted_use"),
+                    exclusivity_clause=la.get("exclusivity_clause"),
+                    co_tenancy=la.get("co_tenancy"),
+                    assignment_subletting=la.get("assignment_subletting"),
+                    source_document=f"lease_{idx+1}.pdf",
+                    extraction_confidence=float(la.get("extraction_confidence", 0.8) or 0.8),
+                    missing_fields=list(la.get("missing_fields", [])),
+                ))
+            except Exception:
+                continue
+
+        # --- Map red flags ---
+        red_flag_records: list[RedFlag] = []
+        raw_flags = red_flags_result.get("red_flags", [])
+        for rf in raw_flags:
+            try:
+                sev_str = str(rf.get("severity", "medium")).lower()
+                sev = Severity(sev_str) if sev_str in [s.value for s in Severity] else Severity.MEDIUM
+                red_flag_records.append(RedFlag(
+                    id=str(rf.get("id", str(uuid.uuid4()))),
+                    category=str(rf.get("category", "general")),
+                    severity=sev,
+                    title=str(rf.get("title", "")),
+                    description=str(rf.get("description", "")),
+                    affected_tenants=list(rf.get("affected_tenants", [])),
+                    financial_impact=rf.get("financial_impact"),
+                    recommended_action=str(rf.get("recommended_action", "")),
+                    source_documents=list(rf.get("source_documents", [])),
+                ))
+            except Exception:
+                continue
+
         result = AnalysisResult(
             deal_id=deal_id,
             property_name="Property Under Analysis",
             property_address="Address TBD",
             analysis_date=datetime.utcnow().isoformat(),
             deal_score=DealScore(
-                overall_score=deal_score.get("deal_score", {}).get("overall_score", 75),
-                tier=deal_score.get("deal_score", {}).get("tier", "Standard"),
-                sub_scores=deal_score.get("deal_score", {}).get("sub_scores", {}),
-                score_factors=deal_score.get("score_factors", [])
+                overall_score=int(deal_score.get("deal_score", {}).get("overall_score", 75)),
+                tier=str(deal_score.get("deal_score", {}).get("tier", "Standard")),
+                sub_scores={k: int(v) for k, v in deal_score.get("deal_score", {}).get("sub_scores", {}).items()},
+                score_factors=list(deal_score.get("score_factors", []))
             ),
             rsf_reconciliation=RSFReconciliation(
-                total_rsf_rent_roll=rsf_reconciliation.get("reconciliation", {}).get("total_rsf_rent_roll", 0),
-                total_rsf_leases=rsf_reconciliation.get("reconciliation", {}).get("total_rsf_leases", 0),
-                total_rsf_boma=rsf_reconciliation.get("reconciliation", {}).get("total_rsf_boma", 0),
-                variance_rent_roll_vs_boma=rsf_reconciliation.get("reconciliation", {}).get("variance_rent_roll_vs_boma", 0),
-                variance_percentage=rsf_reconciliation.get("reconciliation", {}).get("variance_percentage", 0),
-                estimated_annual_revenue_impact=rsf_reconciliation.get("reconciliation", {}).get("estimated_annual_revenue_impact", 0),
-                discrepancies=rsf_reconciliation.get("by_tenant", [])
+                total_rsf_rent_roll=float(rsf_reconciliation.get("reconciliation", {}).get("total_rsf_rent_roll", 0) or 0),
+                total_rsf_leases=float(rsf_reconciliation.get("reconciliation", {}).get("total_rsf_leases", 0) or 0),
+                total_rsf_boma=float(rsf_reconciliation.get("reconciliation", {}).get("total_rsf_boma", 0) or 0),
+                variance_rent_roll_vs_boma=float(rsf_reconciliation.get("reconciliation", {}).get("variance_rent_roll_vs_boma", 0) or 0),
+                variance_percentage=float(rsf_reconciliation.get("reconciliation", {}).get("variance_percentage", 0) or 0),
+                estimated_annual_revenue_impact=float(rsf_reconciliation.get("reconciliation", {}).get("estimated_annual_revenue_impact", 0) or 0),
+                discrepancies=list(rsf_reconciliation.get("by_tenant", []))
             ),
-            tenants=[],  # Would be populated from rent roll
-            lease_abstracts=[],  # Would be converted from lease_abstracts
-            red_flags=[],  # Would be converted from red_flags_result
+            tenants=tenant_records,
+            lease_abstracts=lease_abstract_records,
+            red_flags=red_flag_records,
             documents_processed=docs,
-            what_to_get_next=completeness.get("what_to_request_next", []),
+            what_to_get_next=list(completeness.get("what_to_request_next", [])),
             financial_summary=rent_roll_analysis.get("summary", {})
         )
         

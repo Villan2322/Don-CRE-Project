@@ -20,7 +20,8 @@ import {
 import { cn } from '@/lib/utils'
 
 interface UploadedFile {
-  id: string
+  id: string            // client-side UUID, used only for React keys
+  documentId?: string   // real backend document_id returned after upload
   file: File
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
   progress: number
@@ -29,13 +30,14 @@ interface UploadedFile {
 }
 
 interface DocumentUploadProps {
-  onAnalysisStart?: (documentIds: string[]) => void
+  onAnalysisComplete?: (dealId: string) => void
 }
 
-export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
+export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -88,6 +90,7 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
                 ...f,
                 status: 'completed' as const,
                 progress: 100,
+                documentId: result.document_id,
                 documentType: result.message?.split('classified as ')[1] || 'Unknown',
               }
             : f
@@ -113,15 +116,44 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
 
   const runAnalysis = async () => {
     setIsAnalyzing(true)
-    
-    // Simulate analysis for demo (in production, call /api/analyze)
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    
-    setIsAnalyzing(false)
-    setAnalysisComplete(true)
-    
-    const documentIds = files.filter((f) => f.status === 'completed').map((f) => f.id)
-    onAnalysisStart?.(documentIds)
+    setAnalysisError(null)
+
+    try {
+      // Use real backend document_ids (not client-side UUIDs)
+      const backendDocIds = files
+        .filter((f) => f.status === 'completed' && f.documentId)
+        .map((f) => f.documentId as string)
+
+      if (backendDocIds.length === 0) {
+        throw new Error('No successfully uploaded documents found')
+      }
+
+      const dealId = crypto.randomUUID()
+
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deal_id: dealId, documents: backendDocIds }),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: 'Analysis failed' }))
+        throw new Error(err.detail || 'Analysis failed')
+      }
+
+      const result = await response.json()
+
+      if (result.status === 'failed') {
+        throw new Error(result.message || 'Analysis failed')
+      }
+
+      setAnalysisComplete(true)
+      onAnalysisComplete?.(dealId)
+    } catch (err: any) {
+      setAnalysisError(err.message ?? 'An unexpected error occurred')
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const removeFile = (id: string) => {
@@ -333,6 +365,9 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
               <p className="text-sm text-muted-foreground">
                 {completedCount} documents ready for AI-powered analysis
               </p>
+              {analysisError && (
+                <p className="mt-2 text-sm text-destructive">{analysisError}</p>
+              )}
             </div>
             <Button
               size="lg"
