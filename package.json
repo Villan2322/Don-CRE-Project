@@ -1,0 +1,9 @@
+{
+  "name": "don-cre-project",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --dir frontend install && pnpm --dir frontend dev",
+    "build": "pnpm --dir frontend install && pnpm --dir frontend build",
+    "start": "pnpm --dir frontend start"
+  }
+}
