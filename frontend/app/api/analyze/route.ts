@@ -497,7 +497,7 @@ export async function POST(req: NextRequest) {
       documents: documentsList,
     }
 
-    store.deals.set(deal_id, result as unknown as AnalysisResult)
+    store.deals.set(deal_id, { id: deal_id, result, createdAt: new Date().toISOString() })
 
     return NextResponse.json({
       deal_id,

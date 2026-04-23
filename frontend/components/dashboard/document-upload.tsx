@@ -32,6 +32,10 @@ interface UploadedFile {
   progress: number
   documentType?: string
   error?: string
+  /** Characters extracted from the document — 0 means nothing usable was parsed */
+  charCount?: number
+  /** True when the server could not extract text from this file */
+  extractionFailed?: boolean
 }
 
 interface KnownSF {
@@ -101,19 +105,30 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         body: formData,
       })
 
-      if (!response.ok) throw new Error('Upload failed')
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({ detail: 'Upload failed' }))
+        throw new Error(errBody.detail ?? 'Upload failed')
+      }
 
       const result = await response.json()
+
+      const extractionFailed = result.extraction_failed === true
+      const charCount: number = result.char_count ?? 0
 
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadedFile.id
             ? {
                 ...f,
+                // If extraction failed the file is stored but flagged — keep status 'completed'
+                // so the document_id is available, but show the warning in the UI
                 status: 'completed' as const,
                 progress: 100,
                 documentId: result.document_id,
-                documentType: result.message?.split('classified as ')[1] || 'Unknown',
+                documentType: result.document_type ?? result.message?.split('classified as ')[1] ?? 'Unknown',
+                charCount,
+                extractionFailed,
+                error: extractionFailed ? (result.extraction_error ?? 'Text extraction failed — PDF may be image-only or encrypted') : undefined,
               }
             : f
         )
@@ -206,7 +221,9 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   }
 
   const completedCount = files.filter((f) => f.status === 'completed').length
-  const pendingCount = files.filter((f) => f.status === 'pending').length
+  const pendingCount   = files.filter((f) => f.status === 'pending').length
+  const extractionFailedFiles = files.filter((f) => f.status === 'completed' && f.extractionFailed)
+  const canRunAnalysis = completedCount > 0 && extractionFailedFiles.length === 0 && !isAnalyzing
 
   return (
     <div className="space-y-6">
@@ -378,9 +395,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                     {uploadedFile.status === 'uploading' && (
                       <Progress value={uploadedFile.progress} className="mt-2 h-1" />
                     )}
-                    {uploadedFile.documentType && (
+                    {uploadedFile.documentType && !uploadedFile.extractionFailed && (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Classified as: {uploadedFile.documentType}
+                        {uploadedFile.documentType}
+                        {uploadedFile.charCount != null && (
+                          <span className="ml-2 text-emerald-400 font-medium">
+                            {uploadedFile.charCount.toLocaleString()} chars extracted
+                          </span>
+                        )}
                       </p>
                     )}
                     {uploadedFile.error && (
@@ -412,16 +434,24 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
       {/* Analysis Button */}
       {completedCount > 0 && (
-        <Card className="border-primary/50 bg-primary/5">
+        <Card className={cn('border-primary/50 bg-primary/5', extractionFailedFiles.length > 0 && 'border-destructive/50 bg-destructive/5')}>
           <CardContent className="flex items-center justify-between p-6">
             <div>
-              <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
-              <p className="text-sm text-muted-foreground">
-                {completedCount} document{completedCount !== 1 ? 's' : ''} ready
-                {knownSF.bomaSF || knownSF.rentRollSF || knownSF.leaseSF
-                  ? ' · SF figures provided'
-                  : ' · SF will be extracted from documents'}
-              </p>
+              <h3 className="text-lg font-semibold text-foreground">
+                {extractionFailedFiles.length > 0 ? 'Extraction Error' : 'Ready for Analysis'}
+              </h3>
+              {extractionFailedFiles.length > 0 ? (
+                <p className="mt-1 text-sm text-destructive">
+                  {extractionFailedFiles.length} file{extractionFailedFiles.length !== 1 ? 's' : ''} could not be parsed ({extractionFailedFiles.map((f) => f.file.name).join(', ')}). Remove them or replace with text-based PDFs.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {completedCount} document{completedCount !== 1 ? 's' : ''} ready
+                  {knownSF.bomaSF || knownSF.rentRollSF || knownSF.leaseSF
+                    ? ' · SF figures provided'
+                    : ' · SF will be extracted from documents'}
+                </p>
+              )}
               {analysisError && (
                 <p className="mt-2 text-sm text-destructive">{analysisError}</p>
               )}
@@ -429,7 +459,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <Button
               size="lg"
               onClick={runAnalysis}
-              disabled={isAnalyzing}
+              disabled={!canRunAnalysis}
               className="min-w-[160px]"
             >
               {isAnalyzing ? (

@@ -316,14 +316,38 @@ export async function POST(req: NextRequest) {
   const docs = docIds.map((id) => store.documents.get(id)).filter(Boolean)
   if (!docs.length) {
     console.error('[v0] stream: no documents found in store for IDs:', docIds)
-    return new Response(JSON.stringify({ detail: 'No documents found for provided IDs' }), { status: 400 })
+    return new Response(
+      JSON.stringify({ detail: `No documents found in store for IDs: ${docIds.join(', ')}. The server may have restarted — please re-upload your documents.` }),
+      { status: 400 },
+    )
   }
 
   console.log('[v0] stream: OPENROUTER_API_KEY set:', !!process.env.OPENROUTER_API_KEY)
-  console.log('[v0] stream: found', docs.length, 'document(s):', docs.map((d) => `${d!.filename} (${d!.content?.length ?? 0} chars)`))
+  console.log('[v0] stream: found', docs.length, 'doc(s):', docs.map((d) => `${d!.filename} (${d!.charCount ?? d!.content?.length ?? 0} chars, failed=${d!.extractionFailed})`))
+
+  // Fail fast if every document has failed text extraction — agents have nothing to work with
+  const allFailed = docs.every((d) => d!.extractionFailed)
+  if (allFailed) {
+    const errors = docs.map((d) => `${d!.filename}: ${d!.extractionError ?? 'extraction failed'}`).join('; ')
+    return new Response(
+      JSON.stringify({ detail: `All documents failed text extraction and cannot be analyzed. ${errors}` }),
+      { status: 422 },
+    )
+  }
+
+  // Warn about any individual doc that failed — include it but note the issue
+  const failedDocs = docs.filter((d) => d!.extractionFailed)
+  if (failedDocs.length) {
+    console.warn('[v0] stream:', failedDocs.length, 'document(s) had extraction failures and will contribute no text:', failedDocs.map((d) => d!.filename))
+  }
 
   const allText = docs
-    .map((d) => `=== ${d!.filename} (${d!.document_type}) ===\n${d!.content}`)
+    .map((d) => {
+      if (d!.extractionFailed) {
+        return `=== ${d!.filename} (${d!.document_type}) — EXTRACTION FAILED: ${d!.extractionError ?? 'unknown error'} ===`
+      }
+      return `=== ${d!.filename} (${d!.document_type}) ===\n${d!.content}`
+    })
     .join('\n\n')
 
   console.log('[v0] stream: total allText length:', allText.length, 'chars')
@@ -374,6 +398,21 @@ export async function POST(req: NextRequest) {
               error: errMsg,
             })
           }
+        }
+
+        // ─── Guard: core agents must have succeeded ───────────────────────────
+        // rent_roll is the foundation — without it nothing else is meaningful.
+        const coreAgentsFailed = ['rent_roll'].filter((id) => results[id] === null)
+        if (coreAgentsFailed.length) {
+          emit({
+            type: 'analysis_error',
+            agentId: 'assembly',
+            agentName: 'Assembly',
+            description: 'Assembling final result',
+            error: `Core agent(s) failed and analysis cannot proceed: ${coreAgentsFailed.join(', ')}. Check the agent rows above for the specific error from the AI model.`,
+          })
+          controller.close()
+          return
         }
 
         // ─── Assemble final DealAnalysis result ───────────────────────────────

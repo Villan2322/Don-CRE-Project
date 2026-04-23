@@ -1,26 +1,52 @@
 /**
- * Simple in-memory store for documents and deal results.
- * In production this would be a real database.
- * Attached to the global object so it survives Next.js hot reloads in dev.
+ * Global in-memory store that survives Next.js HMR and cross-route module
+ * boundaries by hanging off globalThis. Each document uploaded is stored here
+ * until the process restarts.
+ *
+ * Self-contained — no imports from other local modules so it can be safely
+ * required by any route without circular dependency risk.
  */
 
-import type { Document, AnalysisResult } from './api'
+export interface StoredDocument {
+  id: string
+  filename: string
+  document_type: string
+  status: 'completed' | 'error'
+  uploaded_at: string
+  processed_at: string
+  page_count: number | null
+  extracted_data: unknown | null
+  /** Full extracted text content */
+  content: string
+  /** Number of characters successfully extracted */
+  charCount: number
+  /** True when pdf-parse could not extract usable text */
+  extractionFailed: boolean
+  /** Human-readable error from pdf-parse if it failed */
+  extractionError?: string
+}
 
-interface Store {
-  documents: Map<string, Document & { content: string }>
-  deals: Map<string, AnalysisResult>
+export interface StoredDeal {
+  id: string
+  result: unknown
+  createdAt: string
+}
+
+interface CREStore {
+  documents: Map<string, StoredDocument>
+  deals: Map<string, StoredDeal>
 }
 
 declare global {
   // eslint-disable-next-line no-var
-  var __creStore: Store | undefined
+  var __donCREStore: CREStore | undefined
 }
 
-if (!global.__creStore) {
-  global.__creStore = {
-    documents: new Map(),
-    deals: new Map(),
+if (!globalThis.__donCREStore) {
+  globalThis.__donCREStore = {
+    documents: new Map<string, StoredDocument>(),
+    deals: new Map<string, StoredDeal>(),
   }
 }
 
-export const store = global.__creStore
+export const store = globalThis.__donCREStore
