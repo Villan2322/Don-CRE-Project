@@ -1,0 +1,7 @@
+{
+  "name": "don-cre-project",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}
