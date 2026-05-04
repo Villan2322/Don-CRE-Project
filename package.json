@@ -1,4 +1,7 @@
 {
   "name": "don-cre-project",
-  "private": true
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && next dev"
+  }
 }
