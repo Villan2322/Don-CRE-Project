@@ -19,20 +19,36 @@ try:
 except ImportError:
     pd = None
 
-from ..agents import (
-    DocumentClassifierAgent,
-    LeaseAbstractionAgent,
-    RentRollAgent,
-    RSFReconciliationAgent,
-    RiskScoringAgent,
-    RedFlagDetectionAgent,
-)
-from ..models.schemas import (
-    DocumentType,
-    ProcessingStatus,
-    ProcessedDocument,
-    AnalysisResult,
-)
+try:
+    from ..agents import (
+        DocumentClassifierAgent,
+        LeaseAbstractionAgent,
+        RentRollAgent,
+        RSFReconciliationAgent,
+        RiskScoringAgent,
+        RedFlagDetectionAgent,
+    )
+    from ..models.schemas import (
+        DocumentType,
+        ProcessingStatus,
+        ProcessedDocument,
+        AnalysisResult,
+    )
+except ImportError:
+    from agents import (
+        DocumentClassifierAgent,
+        LeaseAbstractionAgent,
+        RentRollAgent,
+        RSFReconciliationAgent,
+        RiskScoringAgent,
+        RedFlagDetectionAgent,
+    )
+    from models.schemas import (
+        DocumentType,
+        ProcessingStatus,
+        ProcessedDocument,
+        AnalysisResult,
+    )
 
 
 class DocumentProcessor:
