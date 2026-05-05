@@ -1,12 +1,6 @@
 {
-  "experimentalServices": {
-    "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/"
-    },
-    "backend": {
-      "entrypoint": "backend/main.py",
-      "routePrefix": "/api"
-    }
-  }
+  "framework": "nextjs",
+  "installCommand": "cd frontend && npm install",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/.next"
 }
