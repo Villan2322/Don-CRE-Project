@@ -121,7 +121,9 @@ async def analyze_deal(
         "pipeline_errors": [], "completed_at": None,
     }
 
-    result = graph.invoke(initial_state)
+    result = await graph.ainvoke(initial_state)
+    if not hasattr(processor, 'deals'):
+        processor.deals = {}
     processor.deals[deal_id] = {"result": result, "raw_data": result}
 
     return {
@@ -134,20 +136,22 @@ async def analyze_deal(
     }
 
 
-@app.get("/deals/{deal_id}", response_model=AnalysisResult)
-async def get_deal_analysis(deal_id: str) -> AnalysisResult:
+@app.get("/deals/{deal_id}")
+async def get_deal_analysis(deal_id: str) -> dict:
     """Get the analysis result for a deal."""
-    if deal_id not in processor.deals:
+    deals = getattr(processor, 'deals', {})
+    if deal_id not in deals:
         raise HTTPException(status_code=404, detail="Deal analysis not found")
-    return processor.deals[deal_id]["result"]
+    return deals[deal_id]["result"]
 
 
 @app.get("/deals/{deal_id}/raw")
 async def get_deal_raw_data(deal_id: str) -> dict:
     """Get raw analysis data for debugging/detailed view."""
-    if deal_id not in processor.deals:
+    deals = getattr(processor, 'deals', {})
+    if deal_id not in deals:
         raise HTTPException(status_code=404, detail="Deal analysis not found")
-    return processor.deals[deal_id]["raw_data"]
+    return deals[deal_id]["raw_data"]
 
 
 @app.delete("/documents/{document_id}")

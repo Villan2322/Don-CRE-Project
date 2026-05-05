@@ -63,8 +63,8 @@ export async function uploadDocument(file: File) {
   return api.uploadDocument(file)
 }
 
-export async function runAnalysis(dealId: string, documentIds: string[]) {
-  return api.runAnalysis(dealId, documentIds)
+export async function runAnalysis(dealName: string, files: File[]) {
+  return api.runAnalysis(dealName, files)
 }
 
 export async function deleteDocument(documentId: string) {

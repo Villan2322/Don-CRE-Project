@@ -121,15 +121,25 @@ class APIClient {
     })
   }
 
-  // Analysis operations
-  async runAnalysis(dealId: string, documentIds: string[]): Promise<AnalysisResponse> {
-    return this.request('/analyze', {
+  // Analysis operations — sends files directly as multipart/form-data
+  async runAnalysis(dealName: string, files: File[]): Promise<Record<string, unknown>> {
+    const formData = new FormData()
+    formData.append('deal_name', dealName)
+    for (const file of files) {
+      formData.append('files', file)
+    }
+
+    const response = await fetch(`${API_BASE}/analyze`, {
       method: 'POST',
-      body: JSON.stringify({
-        deal_id: dealId,
-        documents: documentIds,
-      }),
+      body: formData,
     })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: 'Analysis failed' }))
+      throw new Error(err.error || err.detail || 'Analysis failed')
+    }
+
+    return response.json()
   }
 
   async getDealAnalysis(dealId: string): Promise<AnalysisResult> {

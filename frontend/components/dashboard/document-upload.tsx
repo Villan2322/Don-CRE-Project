@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 
 interface UploadedFile {
   id: string
@@ -37,6 +38,8 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [analysisResult, setAnalysisResult] = useState<Record<string, unknown> | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -68,20 +71,7 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
     )
 
     try {
-      const formData = new FormData()
-      formData.append('file', uploadedFile.file)
-
-      const response = await fetch('/api/documents/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(err || 'Upload failed')
-      }
-
-      const result = await response.json()
+      const result = await api.uploadDocument(uploadedFile.file)
 
       setFiles((prev) =>
         prev.map((f) =>
@@ -91,7 +81,7 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
                 status: 'completed' as const,
                 progress: 100,
                 serverId: result.document_id,
-                documentType: result.document_type || result.message?.split('classified as ')[1] || 'Uploaded',
+                documentType: result.message?.split('classified as ')[1] || 'Uploaded',
               }
             : f
         )
@@ -116,31 +106,21 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
 
   const runAnalysis = async () => {
     setIsAnalyzing(true)
+    setAnalysisError(null)
+    setAnalysisResult(null)
 
     try {
       const completedFiles = files.filter((f) => f.status === 'completed')
-      const formData = new FormData()
-      formData.append('deal_name', completedFiles.map((f) => f.file.name).join(', '))
-      for (const f of completedFiles) {
-        formData.append('files', f.file)
-      }
+      const dealName = completedFiles.map((f) => f.file.name).join(', ')
+      const result = await api.runAnalysis(dealName, completedFiles.map((f) => f.file))
 
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(err || 'Analysis failed')
-      }
-
-      const result = await response.json()
+      setAnalysisResult(result)
       setAnalysisComplete(true)
       const documentIds = completedFiles.map((f) => f.serverId || f.id)
       onAnalysisStart?.(documentIds, result)
     } catch (error) {
-      console.error('Analysis error:', error)
+      const msg = (error as Error).message || 'Analysis failed'
+      setAnalysisError(msg)
     } finally {
       setIsAnalyzing(false)
     }
@@ -349,36 +329,76 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
       {/* Analysis Button */}
       {completedCount > 0 && (
         <Card className="border-primary/50 bg-primary/5">
-          <CardContent className="flex items-center justify-between p-6">
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
-              <p className="text-sm text-muted-foreground">
-                {completedCount} documents ready for AI-powered analysis
-              </p>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
+                <p className="text-sm text-muted-foreground">
+                  {completedCount} document{completedCount !== 1 ? 's' : ''} ready for AI-powered analysis
+                </p>
+              </div>
+              <Button
+                size="lg"
+                onClick={runAnalysis}
+                disabled={isAnalyzing}
+                className="min-w-[160px]"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Spinner className="mr-2" />
+                    Analyzing...
+                  </>
+                ) : analysisComplete ? (
+                  <>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Analysis Complete
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Run Analysis
+                  </>
+                )}
+              </Button>
             </div>
-            <Button
-              size="lg"
-              onClick={runAnalysis}
-              disabled={isAnalyzing}
-              className="min-w-[160px]"
-            >
-              {isAnalyzing ? (
-                <>
-                  <Spinner className="mr-2" />
-                  Analyzing...
-                </>
-              ) : analysisComplete ? (
-                <>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  View Results
-                </>
-              ) : (
-                <>
-                  <Play className="mr-2 h-4 w-4" />
-                  Run Analysis
-                </>
-              )}
-            </Button>
+
+            {analysisError && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                <p className="text-sm text-destructive">{analysisError}</p>
+              </div>
+            )}
+
+            {analysisResult && (
+              <div className="rounded-md border border-border bg-card p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pipeline Result</p>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <span className="text-foreground">
+                    Stage: <span className="font-medium">{String(analysisResult.pipeline_stage ?? '—')}</span>
+                  </span>
+                  {analysisResult.overall_score != null && (
+                    <span className="text-foreground">
+                      Score: <span className="font-medium">{String(analysisResult.overall_score)}</span>
+                    </span>
+                  )}
+                  <span className="text-foreground">
+                    Docs processed: <span className="font-medium">{String(analysisResult.documents_processed ?? 0)}</span>
+                  </span>
+                  {!!analysisResult.deal_id && (
+                    <span className="text-muted-foreground text-xs font-mono">
+                      ID: {String(analysisResult.deal_id)}
+                    </span>
+                  )}
+                </div>
+                {Array.isArray(analysisResult.errors) && (analysisResult.errors as string[]).length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {(analysisResult.errors as string[]).map((e, i) => (
+                      <li key={i} className="text-xs text-warning">{String(e)}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -1,4 +1,14 @@
 {
   "name": "don-cre-project",
-  "private": true
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c cyan,yellow \"pnpm --filter my-project dev\" \"cd backend && uv run fastapi dev main.py --port 8000\""
+  },
+  "dependencies": {
+    "concurrently": "^9.2.1",
+    "lucide-react": "^0.564.0",
+    "react": "^19.2.5",
+    "react-dropzone": "^15.0.0",
+    "swr": "^2.4.1"
+  }
 }
