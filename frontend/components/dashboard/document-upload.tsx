@@ -26,10 +26,11 @@ interface UploadedFile {
   progress: number
   documentType?: string
   error?: string
+  serverId?: string
 }
 
 interface DocumentUploadProps {
-  onAnalysisStart?: (documentIds: string[]) => void
+  onAnalysisStart?: (documentIds: string[], analysisResult?: Record<string, unknown>) => void
 }
 
 export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
@@ -76,7 +77,8 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
       })
 
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const err = await response.text()
+        throw new Error(err || 'Upload failed')
       }
 
       const result = await response.json()
@@ -88,7 +90,8 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
                 ...f,
                 status: 'completed' as const,
                 progress: 100,
-                documentType: result.message?.split('classified as ')[1] || 'Unknown',
+                serverId: result.document_id,
+                documentType: result.document_type || result.message?.split('classified as ')[1] || 'Uploaded',
               }
             : f
         )
@@ -97,7 +100,7 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadedFile.id
-            ? { ...f, status: 'error' as const, error: 'Upload failed' }
+            ? { ...f, status: 'error' as const, error: (error as Error).message || 'Upload failed' }
             : f
         )
       )
@@ -113,15 +116,34 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
 
   const runAnalysis = async () => {
     setIsAnalyzing(true)
-    
-    // Simulate analysis for demo (in production, call /api/analyze)
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    
-    setIsAnalyzing(false)
-    setAnalysisComplete(true)
-    
-    const documentIds = files.filter((f) => f.status === 'completed').map((f) => f.id)
-    onAnalysisStart?.(documentIds)
+
+    try {
+      const completedFiles = files.filter((f) => f.status === 'completed')
+      const formData = new FormData()
+      formData.append('deal_name', completedFiles.map((f) => f.file.name).join(', '))
+      for (const f of completedFiles) {
+        formData.append('files', f.file)
+      }
+
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const err = await response.text()
+        throw new Error(err || 'Analysis failed')
+      }
+
+      const result = await response.json()
+      setAnalysisComplete(true)
+      const documentIds = completedFiles.map((f) => f.serverId || f.id)
+      onAnalysisStart?.(documentIds, result)
+    } catch (error) {
+      console.error('Analysis error:', error)
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const removeFile = (id: string) => {

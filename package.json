@@ -1,7 +1,4 @@
 {
   "name": "don-cre-project",
-  "private": true,
-  "scripts": {
-    "dev": "pnpm --filter my-project dev"
-  }
+  "private": true
 }
