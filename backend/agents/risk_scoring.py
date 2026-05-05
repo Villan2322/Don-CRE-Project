@@ -35,16 +35,17 @@ Scoring Categories (weights):
    - Deduct based on count and severity of issues
 
 Deal Tier based on score:
-- 90-100: Investment Grade - Low risk, proceed confidently
-- 75-89: Standard - Some items to address, typical deal
-- 60-74: Caution - Material issues require resolution
-- Below 60: High Risk - Significant concerns, proceed carefully
+- 80-100: GREEN (Proceed with confidence) - Low risk, documentation complete
+- 60-79: YELLOW (Proceed with conditions) - Some items to address before closing
+- 40-59: ORANGE (Material gaps) - Significant issues require resolution
+- 0-39: RED (Insufficient data) - Critical concerns, do not proceed
 
 Return your analysis as JSON:
 {
   "deal_score": {
     "overall_score": 78,
-    "tier": "Standard",
+    "tier": "YELLOW",
+    "deal_readiness": "Proceed with conditions",
     "sub_scores": {
       "document_completeness": 85,
       "rsf_integrity": 65,

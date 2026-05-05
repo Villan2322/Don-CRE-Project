@@ -20,7 +20,7 @@ class SynthesisAgent(BaseAgent):
     """
     
     def __init__(self):
-        super().__init__()
+        super().__init__(name="SynthesisAgent", system_prompt="")
     
     async def synthesize_deal(
         self,
@@ -159,6 +159,9 @@ class ArithmeticVerificationAgent(BaseAgent):
     Independent arithmetic verification.
     Recalculates key figures and flags mismatches.
     """
+    
+    def __init__(self):
+        super().__init__(name="ArithmeticVerificationAgent", system_prompt="")
     
     TOLERANCE = 0.01  # 1% tolerance for floating point comparisons
     
