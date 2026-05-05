@@ -300,13 +300,23 @@ Return JSON array of segments."""
         """
         # If no page texts provided, split by common page markers
         if not page_texts:
-            # Try to split by "Page: X" markers
-            page_pattern = r'(?=Page:\s*\d+)'
-            parts = re.split(page_pattern, full_text)
-            page_texts = [p for p in parts if p.strip()]
+            # Try various page marker patterns
+            page_patterns = [
+                r'(?=-{3,}\s*Page\s*\d+\s*-{3,})',  # --- Page 1 ---
+                r'(?=Page:\s*\d+)',                   # Page: 1
+                r'(?=\n\s*Page\s+\d+\s*\n)',         # Page 1 on its own line
+                r'(?=\[Page\s*\d+\])',               # [Page 1]
+            ]
             
-            # If that didn't work, treat as single page
-            if len(page_texts) <= 1:
+            page_texts = None
+            for pattern in page_patterns:
+                parts = re.split(pattern, full_text)
+                if len(parts) > 1:
+                    page_texts = [p for p in parts if p.strip()]
+                    break
+            
+            # If no pattern matched, treat as single page
+            if not page_texts or len(page_texts) <= 1:
                 page_texts = [full_text]
         
         # Use pattern matching first, then LLM if needed

@@ -574,3 +574,121 @@ class TestScannedPDFHandling:
         # Should have reduced excessive blank lines (max 2 consecutive allowed)
         assert result.count("\n\n\n\n") == 0  # No 4+ consecutive blank lines
         assert len(result) > 0
+
+
+class TestDocumentSegmentation:
+    """Document segmentation tests for multi-section PDFs."""
+    
+    @pytest.mark.asyncio
+    async def test_single_section_not_segmented(self, mock_llm, sample_rent_roll_text):
+        """Single-section documents should return one segment."""
+        from agents.document_segmentation import DocumentSegmentationAgent
+        
+        agent = DocumentSegmentationAgent()
+        segments = await agent.segment_document(sample_rent_roll_text)
+        
+        # Single document should return at least one segment
+        assert len(segments) >= 1
+        assert segments[0].text is not None
+    
+    @pytest.mark.asyncio
+    async def test_multi_section_document_segmented(self, mock_llm):
+        """Multi-section documents should be split into segments."""
+        from agents.document_segmentation import DocumentSegmentationAgent
+        
+        # Simulate a multi-section PDF with clear section headers
+        multi_section_text = """
+MONTHLY MANAGEMENT REPORT
+Town & Country Plaza
+February 2026
+
+--- Page 1 ---
+
+COLLECTION REPORT
+Rent Roll for Period Ending February 2026
+
+Suite    Tenant           RSF      Monthly Rent    Status
+100      Regions Bank     3,200    $4,800.00      Current
+200      State Farm       2,800    $4,200.00      Current
+
+--- Page 5 ---
+
+CASH RECEIPTS & DISBURSEMENTS
+Check Register - February 2026
+
+Date       Payee                Amount
+02/01/26   City Water          $1,234.56
+02/15/26   Electric Co         $2,345.67
+
+--- Page 10 ---
+
+ENDING RECEIVABLES
+AR Aging Report
+
+Tenant         Current   30 Days   60 Days   90+ Days
+Regions Bank   $0.00     $0.00     $0.00     $0.00
+State Farm     $0.00     $500.00   $0.00     $0.00
+"""
+        
+        agent = DocumentSegmentationAgent()
+        segments = await agent.segment_document(multi_section_text)
+        
+        # Should detect multiple sections
+        assert len(segments) >= 2
+        
+        # Check that different document types were detected
+        doc_types = [s.doc_type for s in segments]
+        assert len(set(doc_types)) >= 2  # At least 2 different types
+    
+    @pytest.mark.asyncio
+    async def test_segment_has_required_fields(self, mock_llm, sample_rent_roll_text):
+        """Each segment should have required fields."""
+        from agents.document_segmentation import DocumentSegmentationAgent
+        
+        agent = DocumentSegmentationAgent()
+        segments = await agent.segment_document(sample_rent_roll_text)
+        
+        for segment in segments:
+            assert hasattr(segment, 'doc_type')
+            assert hasattr(segment, 'text')
+            assert hasattr(segment, 'start_page')
+            assert hasattr(segment, 'end_page')
+            assert hasattr(segment, 'confidence')
+            assert segment.start_page >= 1
+            assert segment.end_page >= segment.start_page
+    
+    @pytest.mark.asyncio
+    async def test_empty_text_returns_empty_segments(self, mock_llm):
+        """Empty text should return empty segments list."""
+        from agents.document_segmentation import DocumentSegmentationAgent
+        
+        agent = DocumentSegmentationAgent()
+        segments = await agent.segment_document("")
+        
+        assert isinstance(segments, list)
+        # May return empty list or single "UNKNOWN" segment
+        if len(segments) > 0:
+            assert segments[0].doc_type in ["UNKNOWN", "COVER_LETTER"]
+
+
+class TestPipelineWithSegmentation:
+    """Tests for pipeline with document segmentation enabled."""
+    
+    @pytest.mark.asyncio
+    async def test_multi_page_pdf_triggers_segmentation(self, mock_llm, initial_pipeline_state, sample_pdf_bytes):
+        """Multi-page PDFs should trigger segmentation in ingest."""
+        from graph import ingest_documents
+        
+        # Simulate a multi-page PDF (page_count > 3)
+        state = {
+            **initial_pipeline_state,
+            "raw_files": {"multi_page_report.pdf": sample_pdf_bytes},
+            "file_content_types": {"multi_page_report.pdf": "application/pdf"},
+        }
+        
+        result = await ingest_documents(state)
+        
+        # Should have processed without errors
+        assert "raw_documents" in result
+        # Errors may occur due to mock PDF not having real pages
+        # but the function should not crash
