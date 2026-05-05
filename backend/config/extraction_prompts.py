@@ -335,51 +335,51 @@ SCORING RUBRIC:
 - Risk Factors (15 pts): Deduct for each red flag found
 
 Return JSON with:
-{
-    "rsf_reconciliation": {
-        "sources": {"RENT_ROLL": X, "LEASE_TOTAL": Y, "BOMA": Z},
+{{
+    "rsf_reconciliation": {{
+        "sources": {{"RENT_ROLL": X, "LEASE_TOTAL": Y, "BOMA": Z}},
         "variance_rent_roll_vs_boma": X,
         "variance_percentage": X.X,
-        "by_tenant": [{"tenant": "...", "rent_roll_rsf": X, "boma_rsf": Y, "delta": Z}]
-    },
-    "rent_verification": {
+        "by_tenant": [{{"tenant": "...", "rent_roll_rsf": X, "boma_rsf": Y, "delta": Z}}]
+    }},
+    "rent_verification": {{
         "total_annual_rent": X,
-        "tenant_shares": [{"tenant": "...", "share_pct": X}],
+        "tenant_shares": [{{"tenant": "...", "share_pct": X}}],
         "concentration_flag": true/false
-    },
-    "lease_audit": {
+    }},
+    "lease_audit": {{
         "walt_months": X,
-        "lease_expiry_schedule": [{"tenant": "...", "expiry": "...", "months_remaining": X, "risk_level": "..."}]
-    },
-    "financial_summary": {
+        "lease_expiry_schedule": [{{"tenant": "...", "expiry": "...", "months_remaining": X, "risk_level": "..."}}]
+    }},
+    "financial_summary": {{
         "noi": X,
         "occupancy_pct": X,
         "ar_concerns": "...",
         "cam_recovery_ratio": X
-    },
-    "deal_score": {
+    }},
+    "deal_score": {{
         "overall_score": 0-100,
         "tier": "Verified/Standard/Under Review",
-        "sub_scores": {
+        "sub_scores": {{
             "document_completeness": X,
             "data_consistency": X,
             "lease_quality": X,
             "financial_health": X,
             "risk_factors": X
-        }
-    },
+        }}
+    }},
     "red_flags": [
-        {"severity": "CRITICAL/HIGH/MEDIUM/LOW", "flag": "...", "impact": "...", "resolution": "..."}
+        {{"severity": "CRITICAL/HIGH/MEDIUM/LOW", "flag": "...", "impact": "...", "resolution": "..."}}
     ],
     "what_to_get_next": [
-        {"document": "...", "why_needed": "...", "score_impact": X, "priority": 1}
+        {{"document": "...", "why_needed": "...", "score_impact": X, "priority": 1}}
     ],
-    "rsf_recovery_opportunity": {
+    "rsf_recovery_opportunity": {{
         "recoverable_sf": X,
         "estimated_annual_recovery": X,
         "alert_message": "..."
-    }
-}
+    }}
+}}
 """
 
 

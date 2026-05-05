@@ -20,25 +20,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # ============================================================================
 
 MOCK_CLASSIFICATION_RENT_ROLL = {
-    "doc_type": "RENT_ROLL",
+    "document_type": "RENT_ROLL",
     "confidence": 0.95,
     "reasoning": "Document contains tenant names, suite numbers, square footage, and monthly rent columns typical of a rent roll."
 }
 
 MOCK_CLASSIFICATION_LEASE = {
-    "doc_type": "LEASE",
+    "document_type": "LEASE",
     "confidence": 0.92,
     "reasoning": "Document contains lease agreement terms, tenant obligations, and landlord provisions."
 }
 
 MOCK_CLASSIFICATION_BOMA = {
-    "doc_type": "BOMA",
+    "document_type": "BOMA",
     "confidence": 0.88,
     "reasoning": "Document contains BOMA measurement standards, RSF calculations, and load factors."
 }
 
 MOCK_CLASSIFICATION_UNKNOWN = {
-    "doc_type": "UNKNOWN",
+    "document_type": "UNKNOWN",
     "confidence": 0.0,
     "reasoning": "Unable to determine document type."
 }
@@ -132,38 +132,50 @@ MOCK_BOMA_EXTRACTION = {
 }
 
 MOCK_SYNTHESIS = {
-    "deal_score": {
-        "overall": 66,
-        "deal_readiness": "YELLOW",
-        "components": {
-            "documentation": 70,
-            "data_quality": 65,
-            "risk": 63
-        }
+    "rsf_reconciliation": {
+        "sources": {"RENT_ROLL": 24847, "LEASE_TOTAL": 7500, "BOMA": 29452},
+        "variance_rent_roll_vs_boma": 4605,
+        "variance_percentage": 18.53,
+        "by_tenant": [{"tenant": "Regions Bank", "rent_roll_rsf": 3200, "boma_rsf": 3556, "delta": 356}]
     },
-    "rsf_recovery": {
-        "boma_rsf": 29452,
-        "rent_roll_rsf": 24847,
-        "delta_sf": 4605,
-        "delta_pct": 18.53,
-        "annual_recovery_potential": 51162
+    "rent_verification": {
+        "total_annual_rent": 166800,
+        "tenant_shares": [{"tenant": "Regions Bank", "share_pct": 43.2}],
+        "concentration_flag": True
     },
     "lease_audit": {
         "walt_months": 22.4,
-        "near_term_rollover_pct": 0.15,
-        "below_market_leases": 1
+        "lease_expiry_schedule": [{"tenant": "State Farm", "expiry": "2026-05-31", "months_remaining": 3, "risk_level": "HIGH"}]
     },
-    "tenant_summary": {
-        "total_tenants": 3,
-        "occupied_sf": 7500,
-        "vacancy_sf": 2000,
-        "occupancy_pct": 0.79
+    "financial_summary": {
+        "noi": 125000,
+        "occupancy_pct": 79,
+        "ar_concerns": "Edward Jones has $3,000 in 30-day AR",
+        "cam_recovery_ratio": 0.92
     },
+    "deal_score": {
+        "overall_score": 66,
+        "tier": "Under Review",
+        "sub_scores": {
+            "document_completeness": 14,
+            "data_consistency": 18,
+            "lease_quality": 15,
+            "financial_health": 14,
+            "risk_factors": 5
+        }
+    },
+    "red_flags": [
+        {"severity": "CRITICAL", "flag": "RSF variance exceeds 15%", "impact": "Potential rent shortfall", "resolution": "Request updated BOMA"}
+    ],
     "what_to_get_next": [
-        "Executed lease for State Farm (expiring in 12 months)",
-        "Updated BOMA measurement report",
-        "Historical operating statements (3 years)"
-    ]
+        {"document": "Executed lease for State Farm", "why_needed": "Expiring in 12 months", "score_impact": 8, "priority": 1},
+        {"document": "Updated BOMA measurement", "why_needed": "Verify RSF discrepancy", "score_impact": 5, "priority": 2}
+    ],
+    "rsf_recovery_opportunity": {
+        "recoverable_sf": 4605,
+        "estimated_annual_recovery": 51162,
+        "alert_message": "Potential $51K annual recovery from RSF remeasurement"
+    }
 }
 
 MOCK_ARITHMETIC_VERIFICATION = {
@@ -256,13 +268,24 @@ def mock_llm_router(prompt: str, **kwargs) -> str:
     """
     prompt_lower = prompt.lower()
     
-    # Classification prompts
+    # Classification prompts - check filename hints first for accurate routing
     if "classify" in prompt_lower or "document type" in prompt_lower:
-        if "rent roll" in prompt_lower or "tenant" in prompt_lower and "suite" in prompt_lower:
-            return json.dumps(MOCK_CLASSIFICATION_RENT_ROLL)
-        elif "lease" in prompt_lower and ("agreement" in prompt_lower or "term" in prompt_lower):
+        # Check filename hints in the prompt (most specific first)
+        if "lease_agreement" in prompt_lower or "lease.pdf" in prompt_lower:
             return json.dumps(MOCK_CLASSIFICATION_LEASE)
-        elif "boma" in prompt_lower or "measurement" in prompt_lower:
+        elif "boma.pdf" in prompt_lower or "boma_measurement" in prompt_lower:
+            return json.dumps(MOCK_CLASSIFICATION_BOMA)
+        elif "rent_roll" in prompt_lower:
+            return json.dumps(MOCK_CLASSIFICATION_RENT_ROLL)
+        # Check document content keywords (not classification prompt keywords)
+        # RENT ROLL appears at start of rent roll documents
+        elif "rent roll\n" in prompt_lower or "totals" in prompt_lower and "vacancy" in prompt_lower:
+            return json.dumps(MOCK_CLASSIFICATION_RENT_ROLL)
+        # Lease agreement specific patterns
+        elif "commencement date" in prompt_lower or ("landlord" in prompt_lower and "premises" in prompt_lower):
+            return json.dumps(MOCK_CLASSIFICATION_LEASE)
+        # BOMA measurement specific patterns
+        elif "measurement standard" in prompt_lower or "load factor" in prompt_lower or "common area factor" in prompt_lower:
             return json.dumps(MOCK_CLASSIFICATION_BOMA)
         else:
             return json.dumps(MOCK_CLASSIFICATION_RENT_ROLL)  # Default for tests
@@ -298,9 +321,14 @@ def mock_llm_router(prompt: str, **kwargs) -> str:
     return json.dumps(MOCK_SYNTHESIS)
 
 
-async def async_mock_llm_router(prompt: str, **kwargs) -> str:
-    """Async version of the mock router."""
-    return mock_llm_router(prompt, **kwargs)
+async def async_mock_llm_router(system_prompt: str, user_message: str, max_tokens: int = 4000) -> str:
+    """
+    Async version of the mock router.
+    Matches the signature of BaseAgent.call_llm(self, system_prompt, user_message, max_tokens)
+    """
+    # Combine prompts for routing logic
+    combined = f"{system_prompt} {user_message}".lower()
+    return mock_llm_router(combined)
 
 
 # ============================================================================

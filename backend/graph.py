@@ -8,15 +8,27 @@ from langgraph.types import Send
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 os.environ.setdefault("LANGCHAIN_PROJECT", "cre-document-intelligence")
 
-from .state import CREPipelineState, SingleDocumentState
-from .agents.document_parsing import DocumentParsingAgent
-from .agents.ocr_agent import OCRAgent
-from .agents.universal_extractor import UniversalExtractor
-from .agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
-from .agents.document_classifier import DocumentClassifierAgent
-from .agents.rsf_reconciliation import RSFReconciliationAgent
-from .agents.red_flag_detection import RedFlagDetectionAgent
-from .agents.risk_scoring import RiskScoringAgent
+# Support both package imports (when run as module) and direct imports (for tests)
+try:
+    from .state import CREPipelineState, SingleDocumentState
+    from .agents.document_parsing import DocumentParsingAgent
+    from .agents.ocr_agent import OCRAgent
+    from .agents.universal_extractor import UniversalExtractor
+    from .agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
+    from .agents.document_classifier import DocumentClassifierAgent
+    from .agents.rsf_reconciliation import RSFReconciliationAgent
+    from .agents.red_flag_detection import RedFlagDetectionAgent
+    from .agents.risk_scoring import RiskScoringAgent
+except ImportError:
+    from state import CREPipelineState, SingleDocumentState
+    from agents.document_parsing import DocumentParsingAgent
+    from agents.ocr_agent import OCRAgent
+    from agents.universal_extractor import UniversalExtractor
+    from agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
+    from agents.document_classifier import DocumentClassifierAgent
+    from agents.rsf_reconciliation import RSFReconciliationAgent
+    from agents.red_flag_detection import RedFlagDetectionAgent
+    from agents.risk_scoring import RiskScoringAgent
 
 _parsing_agent = DocumentParsingAgent()
 _ocr_agent = OCRAgent()
