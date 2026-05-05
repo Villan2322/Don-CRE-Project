@@ -1,28 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-// Python backend URL - experimentalServices routes /backend/* to Python FastAPI
-// We need a full URL for fetch() - construct from request or env vars
+// DEPLOYED PYTHON BACKEND URL - hardcoded to always work
+const DEPLOYED_BACKEND = 'https://v0-cre-project-9izjq8l39-anthony-vs-projects-23a0e41a.vercel.app'
+
 function getBackendUrl(request?: NextRequest): string {
-  // 1. Explicit BACKEND_URL env var takes precedence
-  if (process.env.BACKEND_URL) return process.env.BACKEND_URL
-  
-  // 2. In Vercel, construct from request host header (works for all deployments)
-  if (request) {
-    const host = request.headers.get('host')
-    const protocol = request.headers.get('x-forwarded-proto') || 'https'
-    // Only use host if it's a Vercel deployment (not localhost/v0 preview)
-    if (host && host.includes('vercel.app')) {
-      return `${protocol}://${host}`
-    }
-  }
-  
-  // 3. VERCEL_URL for build-time/edge cases
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  
-  // 4. For V0 preview and local dev, use the deployed Vercel backend
-  // This allows testing the real Python backend from V0 preview
-  return 'https://v0-cre-project-9izjq8l39-anthony-vs-projects-23a0e41a.vercel.app'
+  // Always use the deployed backend URL
+  // This ensures V0 preview, local dev, and Vercel all use the real Python backend
+  const backendUrl = process.env.BACKEND_URL || DEPLOYED_BACKEND
+  console.log('[v0] Backend URL resolved to:', backendUrl)
+  return backendUrl
 }
 
 /**
