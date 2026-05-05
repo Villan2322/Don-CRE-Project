@@ -152,40 +152,69 @@ async def delete_document(document_id: str) -> dict:
 async def list_agents() -> dict:
     """List available AI agents and their capabilities."""
     return {
-        "agents": [
+        "pipeline": [
             {
-                "name": "DocumentClassifierAgent",
-                "description": "Classifies documents by type (lease, rent roll, BOMA, etc.)",
-                "input": "Document text or file",
-                "output": "Document type, confidence, metadata"
+                "stage": 1,
+                "name": "DocumentParsingAgent",
+                "description": "Inspects the raw file to determine whether it is text-native or scanned. "
+                               "Extracts text directly for native PDFs, Excel, and CSV. "
+                               "Routes scanned/image PDFs to the OCRAgent.",
+                "input": "Raw file bytes + filename + content-type",
+                "output": "ParseabilityResult: is_parseable, needs_ocr, extracted_text, file_type, confidence"
             },
             {
+                "stage": 2,
+                "name": "OCRAgent",
+                "description": "Fires only when the document is a scanned/image-based PDF. "
+                               "Renders each page to an image via PyMuPDF, runs Tesseract OCR, "
+                               "then passes the raw OCR output through the LLM to clean, "
+                               "correct, and restructure the text before downstream processing.",
+                "input": "Raw PDF bytes (scanned)",
+                "output": "cleaned_text, raw_ocr_text, confidence, ocr_issues_found, document_readable"
+            },
+            {
+                "stage": 3,
+                "name": "DocumentClassifierAgent",
+                "description": "Classifies readable text into CRE document types "
+                               "(LEASE, RENT_ROLL, BOMA_MEASUREMENT, OPERATING_STATEMENT, etc.) "
+                               "and assesses completeness of the due diligence package.",
+                "input": "Cleaned document text",
+                "output": "document_type, confidence, metadata, completeness_score"
+            },
+            {
+                "stage": 4,
                 "name": "LeaseAbstractionAgent",
-                "description": "Extracts 40+ structured fields from lease documents",
+                "description": "Extracts 40+ structured fields from lease documents.",
                 "input": "Lease document text",
                 "output": "Structured lease abstract with all key terms"
             },
             {
+                "stage": 4,
                 "name": "RentRollAgent",
-                "description": "Parses and normalizes rent roll data",
-                "input": "Rent roll (Excel/PDF)",
+                "description": "Parses and normalizes rent roll data, validates against leases, "
+                               "calculates WALT and occupancy.",
+                "input": "Rent roll text (from Excel or PDF)",
                 "output": "Normalized tenant list, summary metrics, issues"
             },
             {
+                "stage": 5,
                 "name": "RSFReconciliationAgent",
-                "description": "Reconciles square footage across sources",
-                "input": "Rent roll, leases, BOMA measurement",
-                "output": "Variance analysis, revenue impact"
+                "description": "Reconciles RSF across rent roll, leases, and BOMA. "
+                               "Flags variances >2% and estimates revenue impact.",
+                "input": "Rent roll data, lease abstracts, BOMA report",
+                "output": "Variance analysis, per-tenant discrepancies, revenue impact"
             },
             {
+                "stage": 6,
                 "name": "RedFlagDetectionAgent",
-                "description": "Identifies deal risks and issues",
+                "description": "Identifies deal risks across 5 categories with severity scoring.",
                 "input": "All analysis data",
-                "output": "Categorized red flags with severity and actions"
+                "output": "Categorized red flags with severity and recommended actions"
             },
             {
+                "stage": 7,
                 "name": "RiskScoringAgent",
-                "description": "Generates comprehensive deal score (0-100)",
+                "description": "Produces a composite 0-100 deal score across 6 weighted categories.",
                 "input": "Complete deal analysis",
                 "output": "Deal score, tier, sub-scores, recommendations"
             }
