@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Header } from '@/components/dashboard/header'
 import { Sidebar } from '@/components/dashboard/sidebar'
 import { TabContent } from '@/components/dashboard/tab-content'
-import { emptyDealAnalysis } from '@/lib/mock-data'
+
 import { TabId, DealAnalysis } from '@/lib/types'
 
 export default function DashboardPage() {

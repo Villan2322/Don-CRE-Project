@@ -19,34 +19,38 @@ interface TabContentProps {
 }
 
 export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {
-  // If no deal data yet, show upload prompt for most tabs
-  if (!deal && activeTab !== 'upload') {
-    return <EmptyState onUploadClick={() => {}} />
+  // Upload tab is always available
+  if (activeTab === 'upload') {
+    return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
   }
 
+  // For all other tabs, show empty state if no deal data
+  if (!deal) {
+    return <EmptyState />
+  }
+
+  // Render the appropriate tab with deal data
   switch (activeTab) {
     case 'snapshot':
-      return deal ? <SnapshotTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <SnapshotTab deal={deal} />
     case 'audit':
-      return deal ? <AuditTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <AuditTab deal={deal} />
     case 'rent-roll':
-      return deal ? <RentRollTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <RentRollTab deal={deal} />
     case 'lease-audit':
-      return deal ? <LeaseAuditTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <LeaseAuditTab deal={deal} />
     case 'risk':
-      return deal ? <RiskTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <RiskTab deal={deal} />
     case 'abstracts':
-      return deal ? <AbstractsTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
-    case 'upload':
-      return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
+      return <AbstractsTab deal={deal} />
     default:
-      return deal ? <SnapshotTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
+      return <SnapshotTab deal={deal} />
   }
 }
 
-function EmptyState({ onUploadClick }: { onUploadClick: () => void }) {
+function EmptyState() {
   return (
-    <div className="flex h-full items-center justify-center">
+    <div className="flex h-full min-h-[400px] items-center justify-center">
       <div className="mx-auto max-w-md text-center">
         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
           <svg
@@ -54,6 +58,7 @@ function EmptyState({ onUploadClick }: { onUploadClick: () => void }) {
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
+            aria-hidden="true"
           >
             <path
               strokeLinecap="round"
