@@ -2,10 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
 // Python backend URL - experimentalServices routes /backend/* to Python FastAPI
-// We need a full URL for fetch() - use the current deployment URL
-function getBackendUrl(): string {
+// We need a full URL for fetch() - construct from request or env vars
+function getBackendUrl(request?: NextRequest): string {
+  // 1. Explicit BACKEND_URL env var takes precedence
   if (process.env.BACKEND_URL) return process.env.BACKEND_URL
+  
+  // 2. In Vercel, construct from request host header (works for all deployments)
+  if (request) {
+    const host = request.headers.get('host')
+    const protocol = request.headers.get('x-forwarded-proto') || 'https'
+    if (host) return `${protocol}://${host}`
+  }
+  
+  // 3. VERCEL_URL for build-time/edge cases
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  
+  // 4. Local development fallback
   return 'http://localhost:8000'
 }
 
@@ -611,7 +623,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Call Python backend - /backend prefix routes to Python via experimentalServices
-      const backendUrl = getBackendUrl()
+      const backendUrl = getBackendUrl(request)
       console.log('[v0] Calling Python backend at:', `${backendUrl}/backend/analyze`)
       const backendResponse = await fetch(`${backendUrl}/backend/analyze`, {
         method: 'POST',
