@@ -461,6 +461,7 @@ Return JSON with:
 
 
 # Synthesis prompt - combines all extractions into deal analysis
+# Updated to match PRD scoring system - 100 points max across 6 categories
 SYNTHESIS_PROMPT = """You are a commercial real estate deal analyst synthesizing data from multiple documents.
 
 You have been provided extractions from: {doc_types_present}
@@ -470,14 +471,51 @@ Your task:
 2. Identify discrepancies (especially RSF between rent roll, leases, and BOMA)
 3. Calculate key metrics: NOI, WALT, occupancy, concentration
 4. Flag risks and red flags
-5. Score the deal from 0-100
+5. Score the deal using the EXACT point system below
 
-SCORING RUBRIC:
-- Document Completeness (20 pts): All critical docs present?
-- Data Consistency (25 pts): RSF, rent, dates match across sources?
-- Lease Quality (20 pts): WALT, rollover concentration, tenant credit
-- Financial Health (20 pts): Collections, AR aging, expense ratios
-- Risk Factors (15 pts): Deduct for each red flag found
+=== SCORING SYSTEM (100 points maximum) ===
+
+1. DATA COMPLETENESS (Max 20 pts)
+   +4 points for EACH key doc type present: LEASE, RENT_ROLL, BOMA, MANAGEMENT_REPORT, COUNTY_PA
+   Maximum 20 points (5 doc types = full score)
+
+2. RSF ALIGNMENT (Max 20 pts)
+   - 20: All RSF sources match within 1%
+   - 15: Minor variance (1-3%)
+   - 10: Moderate variance (3-5%)
+   - 5: Significant variance (5-10%)
+   - 0: Major variance (>10%) or cannot calculate
+
+3. FINANCIAL INTEGRITY (Max 20 pts)
+   - 20: NOI verified, AR current, CAM recovery >95%
+   - 15: Minor AR aging (<5% delinquent)
+   - 10: Moderate AR issues (5-15% delinquent)
+   - 5: Significant AR issues (>15% delinquent)
+   - 0: Cannot verify financials
+
+4. LEASE LEVERAGE (Max 20 pts)
+   - 20: WALT >60 months, all expiry dates known, strong renewal options
+   - 15: WALT 36-60 months, minor gaps
+   - 10: WALT 24-36 months or >30% rolling within 12 months
+   - 5: WALT <24 months or missing expiry on major tenants
+   - 0: Cannot calculate WALT
+
+5. RISK PROFILE (Max 15 pts)
+   - 15: Vacancy <5%, no tenant >30% of income
+   - 12: Vacancy 5-10%, no tenant >50%
+   - 8: Vacancy 10-15% OR single tenant 50-70%
+   - 4: Vacancy >15% OR single tenant >70%
+   - 0: Critical concentration or vacancy
+
+6. DOCUMENT COVERAGE + RSF BONUS (Max 15 pts)
+   - Base: +3 per doc type (max 12 for 4+ types)
+   - BONUS +5: If BOMA and rent roll BOTH present AND delta >5%
+
+=== DEAL TIERS ===
+- 80-100: GREEN - Proceed with confidence
+- 60-79: YELLOW - Proceed with conditions
+- 40-59: ORANGE - Material gaps exist
+- 0-39: RED - Insufficient data
 
 Return JSON with:
 {{
@@ -490,29 +528,48 @@ Return JSON with:
     "rent_verification": {{
         "total_annual_rent": X,
         "tenant_shares": [{{"tenant": "...", "share_pct": X}}],
-        "concentration_flag": true/false
+        "concentration_flag": true/false,
+        "top_tenant_pct": X
     }},
     "lease_audit": {{
         "walt_months": X,
+        "missing_expiry_count": X,
+        "near_term_rollover_pct": X,
         "lease_expiry_schedule": [{{"tenant": "...", "expiry": "...", "months_remaining": X, "risk_level": "..."}}]
     }},
     "financial_summary": {{
         "noi": X,
         "occupancy_pct": X,
-        "ar_concerns": "...",
-        "cam_recovery_ratio": X
+        "vacancy_pct": X,
+        "ar_delinquency_pct": X,
+        "cam_recovery_pct": X,
+        "ar_concerns": "..."
     }},
     "deal_score": {{
         "overall_score": 0-100,
-        "tier": "Verified/Standard/Under Review",
+        "tier": "GREEN/YELLOW/ORANGE/RED",
+        "deal_readiness": "Proceed with confidence/Proceed with conditions/Material gaps exist/Insufficient data",
         "sub_scores": {{
-            "document_completeness": X,
-            "data_consistency": X,
-            "lease_quality": X,
-            "financial_health": X,
-            "risk_factors": X
-        }}
+            "data_completeness": X,
+            "rsf_alignment": X,
+            "financial_integrity": X,
+            "lease_leverage": X,
+            "risk_profile": X,
+            "document_coverage_bonus": X
+        }},
+        "max_scores": {{
+            "data_completeness": 20,
+            "rsf_alignment": 20,
+            "financial_integrity": 20,
+            "lease_leverage": 20,
+            "risk_profile": 15,
+            "document_coverage_bonus": 15
+        }},
+        "rsf_recovery_bonus_applied": true/false
     }},
+    "score_factors": [
+        {{"category": "...", "points_earned": X, "points_possible": X, "reason": "..."}}
+    ],
     "red_flags": [
         {{"severity": "CRITICAL/HIGH/MEDIUM/LOW", "flag": "...", "impact": "...", "resolution": "..."}}
     ],
@@ -522,6 +579,7 @@ Return JSON with:
     "rsf_recovery_opportunity": {{
         "recoverable_sf": X,
         "estimated_annual_recovery": X,
+        "alert_threshold_exceeded": true/false,
         "alert_message": "..."
     }}
 }}

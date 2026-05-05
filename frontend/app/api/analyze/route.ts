@@ -219,12 +219,12 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
     tier: tier as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
     dealReadiness: dealReadiness as DealAnalysis['dealReadiness'],
     subScores: {
-      dataCompleteness: subScores.document_completeness || 4,
-      rsfAlignment: subScores.data_consistency || 6,
-      financialIntegrity: subScores.financial_health || 8,
-      leaseLeverage: subScores.lease_quality || 6,
-      riskProfile: subScores.risk_factors || 4,
-      documentCoverage: subScores.document_completeness || 4,
+      dataCompleteness: subScores.data_completeness || 0,
+      rsfAlignment: subScores.rsf_alignment || 0,
+      financialIntegrity: subScores.financial_integrity || 0,
+      leaseLeverage: subScores.lease_leverage || 0,
+      riskProfile: subScores.risk_profile || 0,
+      documentCoverage: subScores.document_coverage_bonus || 0,
     },
     rsfReconciliation: {
       bomaTotalSF,
