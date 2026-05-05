@@ -15,9 +15,10 @@ import { DocumentUpload } from './document-upload'
 interface TabContentProps {
   activeTab: TabId
   deal: DealAnalysis
+  onAnalysisComplete?: (analysis: DealAnalysis) => void
 }
 
-export function TabContent({ activeTab, deal }: TabContentProps) {
+export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {
   switch (activeTab) {
     case 'snapshot':
       return <SnapshotTab deal={deal} />
@@ -32,7 +33,7 @@ export function TabContent({ activeTab, deal }: TabContentProps) {
     case 'abstracts':
       return <AbstractsTab deal={deal} />
     case 'upload':
-      return <DocumentUpload />
+      return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
     default:
       return <SnapshotTab deal={deal} />
   }

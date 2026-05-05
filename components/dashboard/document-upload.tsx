@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DealAnalysis } from '@/lib/types'
 
 interface UploadedFile {
   id: string
@@ -28,12 +29,19 @@ interface UploadedFile {
   error?: string
 }
 
-interface DocumentUploadProps {
-  onAnalysisStart?: (documentIds: string[]) => void
+interface UploadedDocument {
+  id: string
+  filename: string
+  type: string
 }
 
-export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
+interface DocumentUploadProps {
+  onAnalysisComplete?: (analysis: DealAnalysis) => void
+}
+
+export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([])
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
 
@@ -80,6 +88,17 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
       }
 
       const result = await response.json()
+      const docType = result.classification || 'Unknown'
+
+      // Store the uploaded document info for analysis
+      setUploadedDocuments((prev) => [
+        ...prev,
+        {
+          id: result.documentId,
+          filename: uploadedFile.file.name,
+          type: docType,
+        },
+      ])
 
       setFiles((prev) =>
         prev.map((f) =>
@@ -88,7 +107,7 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
                 ...f,
                 status: 'completed' as const,
                 progress: 100,
-                documentType: result.message?.split('classified as ')[1] || 'Unknown',
+                documentType: docType,
               }
             : f
         )
@@ -114,14 +133,28 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
   const runAnalysis = async () => {
     setIsAnalyzing(true)
     
-    // Simulate analysis for demo (in production, call /api/analyze)
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    
-    setIsAnalyzing(false)
-    setAnalysisComplete(true)
-    
-    const documentIds = files.filter((f) => f.status === 'completed').map((f) => f.id)
-    onAnalysisStart?.(documentIds)
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents: uploadedDocuments }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('Analysis failed')
+      }
+      
+      const result = await response.json()
+      
+      setIsAnalyzing(false)
+      setAnalysisComplete(true)
+      
+      // Pass the analysis results back to the parent
+      onAnalysisComplete?.(result.analysis)
+    } catch (error) {
+      console.error('Analysis error:', error)
+      setIsAnalyzing(false)
+    }
   }
 
   const removeFile = (id: string) => {
