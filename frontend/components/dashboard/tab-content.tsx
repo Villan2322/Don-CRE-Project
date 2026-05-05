@@ -14,29 +14,66 @@ import { DocumentUpload } from './document-upload'
 
 interface TabContentProps {
   activeTab: TabId
-  deal: DealAnalysis
+  deal: DealAnalysis | null
   onAnalysisComplete?: (analysis: DealAnalysis) => void
 }
 
 export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {
+  // If no deal data yet, show upload prompt for most tabs
+  if (!deal && activeTab !== 'upload') {
+    return <EmptyState onUploadClick={() => {}} />
+  }
+
   switch (activeTab) {
     case 'snapshot':
-      return <SnapshotTab deal={deal} />
+      return deal ? <SnapshotTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'audit':
-      return <AuditTab deal={deal} />
+      return deal ? <AuditTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'rent-roll':
-      return <RentRollTab deal={deal} />
+      return deal ? <RentRollTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'lease-audit':
-      return <LeaseAuditTab deal={deal} />
+      return deal ? <LeaseAuditTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'risk':
-      return <RiskTab deal={deal} />
+      return deal ? <RiskTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'abstracts':
-      return <AbstractsTab deal={deal} />
+      return deal ? <AbstractsTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
     case 'upload':
       return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
     default:
-      return <SnapshotTab deal={deal} />
+      return deal ? <SnapshotTab deal={deal} /> : <EmptyState onUploadClick={() => {}} />
   }
+}
+
+function EmptyState({ onUploadClick }: { onUploadClick: () => void }) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="mx-auto max-w-md text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+          <svg
+            className="h-8 w-8 text-muted-foreground"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold">No Deal Analyzed Yet</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Upload documents to start analyzing a deal. Supported formats include rent rolls, 
+          leases, BOMA measurements, and financial statements.
+        </p>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Go to the <span className="font-medium">Upload Documents</span> tab to get started.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 function SnapshotTab({ deal }: { deal: DealAnalysis }) {

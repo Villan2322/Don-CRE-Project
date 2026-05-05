@@ -145,21 +145,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       }
       
       const result = await response.json()
-      console.log('[v0] Analysis API response:', result)
-      console.log('[v0] Analysis data:', result.analysis)
       
       setIsAnalyzing(false)
       setAnalysisComplete(true)
       
-      // Pass the analysis results back to the parent
       if (result.analysis) {
-        console.log('[v0] Calling onAnalysisComplete with:', result.analysis.dealName, result.analysis.score)
         onAnalysisComplete?.(result.analysis)
-      } else {
-        console.error('[v0] No analysis in response')
       }
-    } catch (error) {
-      console.error('Analysis error:', error)
+    } catch {
       setIsAnalyzing(false)
     }
   }
