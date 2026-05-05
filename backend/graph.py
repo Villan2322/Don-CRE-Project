@@ -292,6 +292,22 @@ async def extract_single_document(state: SingleDocumentState) -> dict:
         }
 
 
+def calculate_data_completeness_score(doc_types: list[str]) -> tuple[int, list[str]]:
+    """Calculate data completeness score based on document categories present."""
+    categories = {
+        "tenant_rent": ["RENT_ROLL", "RENT_ROLL_XLSX"],
+        "lease_terms": ["LEASE", "LEASE_ABSTRACT", "LEASE_RECAP"],
+        "measurements": ["BOMA", "COUNTY_PA"],
+        "financials": ["MANAGEMENT_REPORT", "FINANCIAL_MODEL", "DISBURSEMENTS", "INCOME_EXPENSE"],
+        "receivables": ["ENDING_RECEIVABLES", "AR_AGING", "CAM_RECONCILIATION"],
+    }
+    categories_found = []
+    for cat_name, cat_types in categories.items():
+        if any(dt in doc_types for dt in cat_types):
+            categories_found.append(cat_name)
+    return min(len(categories_found) * 4, 20), categories_found
+
+
 async def synthesize(state: CREPipelineState) -> dict:
     try:
         result = await _synthesizer.synthesize_deal(
@@ -301,8 +317,60 @@ async def synthesize(state: CREPipelineState) -> dict:
                     "synthesis_error": result["_parse_error"],
                     "pipeline_stage": "synthesis_failed",
                     "pipeline_errors": [f"Synthesis error: {result['_parse_error']}"]}
-        return {"synthesis": result["synthesis"], "rsf_recovery": result.get("rsf_recovery", {}),
-                "score_summary": result.get("score_summary", {}),
+        
+        # Get doc types from extractions for deterministic scoring
+        doc_types = list(set(ext["doc_type"] for ext in state["extractions"]))
+        print(f"[SCORING] Doc types for scoring: {doc_types}")
+        
+        # Calculate deterministic data completeness score
+        data_completeness, categories_found = calculate_data_completeness_score(doc_types)
+        print(f"[SCORING] Categories found: {categories_found} = {data_completeness}/20 pts")
+        
+        # Override the LLM's data_completeness with deterministic calculation
+        score_summary = result.get("score_summary", {})
+        synthesis = result.get("synthesis", {})
+        
+        if synthesis.get("deal_score", {}).get("sub_scores"):
+            old_score = synthesis["deal_score"]["sub_scores"].get("data_completeness", 0)
+            synthesis["deal_score"]["sub_scores"]["data_completeness"] = data_completeness
+            
+            # Recalculate overall score
+            sub_scores = synthesis["deal_score"]["sub_scores"]
+            new_overall = sum([
+                sub_scores.get("data_completeness", 0),
+                sub_scores.get("rsf_alignment", 0),
+                sub_scores.get("financial_integrity", 0),
+                sub_scores.get("lease_leverage", 0),
+                sub_scores.get("risk_profile", 0),
+                sub_scores.get("document_coverage_bonus", 0),
+            ])
+            
+            old_overall = synthesis["deal_score"].get("overall_score", 0)
+            synthesis["deal_score"]["overall_score"] = min(new_overall, 100)
+            
+            # Update tier based on new score
+            if new_overall >= 80:
+                synthesis["deal_score"]["tier"] = "GREEN"
+                synthesis["deal_score"]["deal_readiness"] = "Proceed with confidence"
+            elif new_overall >= 60:
+                synthesis["deal_score"]["tier"] = "YELLOW"
+                synthesis["deal_score"]["deal_readiness"] = "Proceed with conditions"
+            elif new_overall >= 40:
+                synthesis["deal_score"]["tier"] = "ORANGE"
+                synthesis["deal_score"]["deal_readiness"] = "Material gaps exist"
+            else:
+                synthesis["deal_score"]["tier"] = "RED"
+                synthesis["deal_score"]["deal_readiness"] = "Insufficient data"
+            
+            print(f"[SCORING] Adjusted: data_completeness {old_score}->{data_completeness}, overall {old_overall}->{new_overall}")
+            score_summary = synthesis["deal_score"]
+        
+        # Add doc_types_present to synthesis for frontend
+        synthesis["doc_types_present"] = doc_types
+        synthesis["categories_found"] = categories_found
+        
+        return {"synthesis": synthesis, "rsf_recovery": result.get("rsf_recovery", {}),
+                "score_summary": score_summary,
                 "synthesis_error": None, "pipeline_stage": "synthesized"}
     except Exception as e:
         return {"synthesis": {}, "rsf_recovery": {}, "score_summary": {},
