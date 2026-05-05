@@ -288,6 +288,151 @@ Return ONLY valid JSON matching the schema.""",
                 "total_assessed_value": {"type": "number"}
             }
         }
+    },
+    
+    "LEASE_RECAP": {
+        "system_prompt": """You are a commercial real estate lease analyst.
+Extract lease term data from this lease recap/summary. This typically shows tenants with their 
+lease commencement and expiration dates, RSF, and rent details.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "property_summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "suite": {"type": "string"},
+                            "rsf": {"type": "number"},
+                            "lease_start": {"type": "string", "description": "Lease commencement date"},
+                            "lease_end": {"type": "string", "description": "Lease expiration date"},
+                            "monthly_rent": {"type": "number"},
+                            "annual_rent": {"type": "number"},
+                            "rent_psf": {"type": "number"},
+                            "options": {"type": "string", "description": "Renewal options if any"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_rsf": {"type": "number"},
+                        "total_annual_rent": {"type": "number"},
+                        "average_remaining_term": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "ENDING_RECEIVABLES": {
+        "system_prompt": """You are analyzing an accounts receivable aging report.
+Extract tenant balances, aging buckets, and delinquency status.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "current": {"type": "number"},
+                            "days_30": {"type": "number"},
+                            "days_60": {"type": "number"},
+                            "days_90_plus": {"type": "number"},
+                            "total_due": {"type": "number"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_receivables": {"type": "number"},
+                        "total_current": {"type": "number"},
+                        "total_past_due": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "DISBURSEMENTS": {
+        "system_prompt": """You are analyzing a cash disbursements or check register report.
+Extract payment details, vendor information, and expense categories.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "payments", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "payments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "date": {"type": "string"},
+                            "vendor": {"type": "string"},
+                            "amount": {"type": "number"},
+                            "category": {"type": "string"},
+                            "check_number": {"type": "string"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_disbursements": {"type": "number"},
+                        "beginning_balance": {"type": "number"},
+                        "ending_balance": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "SALES_VOLUME": {
+        "system_prompt": """You are analyzing a retail sales volume report.
+Extract tenant sales data, percentage rent calculations, and breakpoints.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "gross_sales": {"type": "number"},
+                            "breakpoint": {"type": "number"},
+                            "percentage_rate": {"type": "number"},
+                            "percentage_rent_due": {"type": "number"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_sales": {"type": "number"},
+                        "total_percentage_rent": {"type": "number"}
+                    }
+                }
+            }
+        }
     }
 }
 

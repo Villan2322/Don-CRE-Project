@@ -51,6 +51,7 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
   const tenants: Tenant[] = []
   let totalAnnualRent = 0
   
+  // First pass: extract from RENT_ROLL
   for (const extraction of extractions) {
     if (extraction.doc_type === 'RENT_ROLL' || extraction.doc_type === 'RENT_ROLL_XLSX') {
       const extractedData = (extraction.extraction as Record<string, unknown>) || {}
@@ -79,6 +80,56 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
           arStatus: ((t.ar_balance as number) || 0) > 0 ? 'DELINQUENT' : 'CURRENT',
           arBalance: (t.ar_balance as number) || 0,
         })
+      }
+    }
+  }
+  
+  // Second pass: merge lease dates from LEASE_RECAP if available
+  for (const extraction of extractions) {
+    if (extraction.doc_type === 'LEASE_RECAP' || extraction.doc_type === 'LEASE_ABSTRACT') {
+      const extractedData = (extraction.extraction as Record<string, unknown>) || {}
+      const recapTenants = (extractedData.tenants as Array<Record<string, unknown>>) || []
+      
+      for (const recapTenant of recapTenants) {
+        const name = (recapTenant.tenant_name as string) || ''
+        const leaseEnd = (recapTenant.lease_end as string) || null
+        const leaseStart = (recapTenant.lease_start as string) || ''
+        
+        // Try to find matching tenant and update lease dates
+        const existingTenant = tenants.find(t => 
+          t.name.toLowerCase().includes(name.toLowerCase().substring(0, 10)) ||
+          name.toLowerCase().includes(t.name.toLowerCase().substring(0, 10))
+        )
+        
+        if (existingTenant && leaseEnd && !existingTenant.leaseExpiry) {
+          existingTenant.leaseExpiry = leaseEnd
+          existingTenant.leaseStart = leaseStart || existingTenant.leaseStart
+          existingTenant.monthsRemaining = calculateMonthsRemaining(leaseEnd)
+          existingTenant.riskLevel = calculateRiskLevel(leaseEnd, existingTenant.arBalance)
+        } else if (!existingTenant && leaseEnd) {
+          // Add new tenant from lease recap if not in rent roll
+          const annualRent = (recapTenant.annual_rent as number) || ((recapTenant.monthly_rent as number) || 0) * 12
+          totalAnnualRent += annualRent
+          
+          tenants.push({
+            id: `t-${tenants.length + 1}`,
+            name: name || 'Unknown',
+            suite: (recapTenant.suite as string) || '',
+            rsf: (recapTenant.rsf as number) || 0,
+            bomaRsf: (recapTenant.rsf as number) || 0,
+            rsfDelta: 0,
+            monthlyRent: (recapTenant.monthly_rent as number) || 0,
+            annualRent: annualRent,
+            rentPSF: (recapTenant.rent_psf as number) || 0,
+            leaseStart: leaseStart,
+            leaseExpiry: leaseEnd,
+            monthsRemaining: calculateMonthsRemaining(leaseEnd),
+            incomeConcentration: 0,
+            riskLevel: calculateRiskLevel(leaseEnd, 0),
+            arStatus: 'CURRENT',
+            arBalance: 0,
+          })
+        }
       }
     }
   }
