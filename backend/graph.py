@@ -64,6 +64,13 @@ async def ingest_documents(state: CREPipelineState) -> dict:
     return {"raw_documents": raw_documents, "ingest_errors": errors, "pipeline_stage": "ingested"}
 
 
+VALID_DOC_TYPES = {
+    "LEASE", "LEASE_ABSTRACT", "RENT_ROLL", "RENT_ROLL_XLSX",
+    "BOMA", "FINANCIAL_MODEL", "CAM_RECONCILIATION",
+    "MANAGEMENT_REPORT", "COUNTY_PA",
+}
+
+
 async def classify_documents(state: CREPipelineState) -> dict:
     classified = []
     errors = []
@@ -73,20 +80,35 @@ async def classify_documents(state: CREPipelineState) -> dict:
             result = await _extractor.classify_document(
                 text=doc["extracted_text"], filename=doc["filename"],
                 mime_type=doc.get("content_type"))
-            return {**doc, "doc_type": result["doc_type"],
-                    "classification_confidence": result["confidence"],
-                    "classification_reasoning": result.get("reasoning", "")}
+            raw_type = result.get("doc_type", "UNKNOWN")
+            # Normalise: upper-case, strip whitespace, map common aliases
+            doc_type = raw_type.strip().upper().replace(" ", "_").replace("-", "_")
+            if doc_type not in VALID_DOC_TYPES:
+                doc_type = "MANAGEMENT_REPORT"  # fallback for misc CRE docs
+            return {
+                **doc,
+                "doc_type": doc_type,
+                "classification_confidence": result.get("confidence", 0.5),
+                "classification_reasoning": result.get("reasoning", ""),
+            }
         except Exception as e:
             errors.append(f"{doc['filename']}: {str(e)}")
             return {**doc, "doc_type": "UNKNOWN", "classification_confidence": 0.0,
                     "classification_reasoning": str(e)}
 
     results = await asyncio.gather(*[classify_one(doc) for doc in state["raw_documents"]])
-    return {"classified_documents": list(results), "classification_errors": errors,
-            "pipeline_stage": "classified"}
+    return {
+        "classified_documents": list(results),
+        "classification_errors": errors,
+        "pipeline_stage": "classified",
+    }
 
 
 def fan_out_extractions(state: CREPipelineState) -> list[Send]:
+    docs = [d for d in state["classified_documents"] if d["doc_type"] != "UNKNOWN"]
+    if not docs:
+        # No extractable docs — go straight to synthesize with empty extractions
+        return [Send("synthesize", state)]
     return [
         Send("extract_single_document", SingleDocumentState(
             doc_id=doc["doc_id"], deal_name=doc["deal_name"],
@@ -95,8 +117,7 @@ def fan_out_extractions(state: CREPipelineState) -> list[Send]:
             ocr_performed=doc["ocr_performed"],
             classification_confidence=doc["classification_confidence"],
         ))
-        for doc in state["classified_documents"]
-        if doc["doc_type"] != "UNKNOWN"
+        for doc in docs
     ]
 
 

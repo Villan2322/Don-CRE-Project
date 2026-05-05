@@ -126,13 +126,44 @@ async def analyze_deal(
         processor.deals = {}
     processor.deals[deal_id] = {"result": result, "raw_data": result}
 
+    all_errors = (
+        result.get("ingest_errors", [])
+        + result.get("classification_errors", [])
+        + result.get("extraction_errors", [])
+        + result.get("pipeline_errors", [])
+    )
+
+    classified = result.get("classified_documents", [])
+    extractions = result.get("extractions", [])
+
     return {
         "deal_id": deal_id,
         "pipeline_stage": result.get("pipeline_stage"),
         "overall_score": result.get("score_summary", {}).get("overall"),
         "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
-        "documents_processed": len(result.get("extractions", [])),
-        "errors": result.get("pipeline_errors", []),
+        "documents_ingested": len(result.get("raw_documents", [])),
+        "documents_classified": len(classified),
+        "documents_processed": len(extractions),
+        "classifications": [
+            {
+                "filename": d["filename"],
+                "doc_type": d["doc_type"],
+                "confidence": d["classification_confidence"],
+            }
+            for d in classified
+        ],
+        "extraction_results": [
+            {
+                "filename": e["filename"],
+                "doc_type": e["doc_type"],
+                "success": not e.get("parse_error"),
+                "error": e.get("parse_error"),
+            }
+            for e in extractions
+        ],
+        "synthesis": result.get("synthesis", {}),
+        "score_summary": result.get("score_summary", {}),
+        "errors": all_errors,
     }
 
 

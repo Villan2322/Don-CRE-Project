@@ -370,32 +370,62 @@ export function DocumentUpload({ onAnalysisStart }: DocumentUploadProps) {
             )}
 
             {analysisResult && (
-              <div className="rounded-md border border-border bg-card p-3 space-y-1">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pipeline Result</p>
-                <div className="flex flex-wrap gap-4 text-sm">
-                  <span className="text-foreground">
-                    Stage: <span className="font-medium">{String(analysisResult.pipeline_stage ?? '—')}</span>
+              <div className="rounded-md border border-border bg-card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pipeline Result</p>
+                  <span className="text-xs text-muted-foreground">
+                    Stage: <span className="font-medium text-foreground">{String(analysisResult.pipeline_stage ?? '—')}</span>
                   </span>
-                  {analysisResult.overall_score != null && (
-                    <span className="text-foreground">
-                      Score: <span className="font-medium">{String(analysisResult.overall_score)}</span>
-                    </span>
-                  )}
-                  <span className="text-foreground">
-                    Docs processed: <span className="font-medium">{String(analysisResult.documents_processed ?? 0)}</span>
-                  </span>
-                  {!!analysisResult.deal_id && (
-                    <span className="text-muted-foreground text-xs font-mono">
-                      ID: {String(analysisResult.deal_id)}
-                    </span>
-                  )}
                 </div>
-                {Array.isArray(analysisResult.errors) && (analysisResult.errors as string[]).length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {(analysisResult.errors as string[]).map((e, i) => (
-                      <li key={i} className="text-xs text-warning">{String(e)}</li>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Ingested', value: analysisResult.documents_ingested ?? 0 },
+                    { label: 'Classified', value: analysisResult.documents_classified ?? 0 },
+                    { label: 'Extracted', value: analysisResult.documents_processed ?? 0 },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="rounded border border-border bg-muted/30 px-3 py-2 text-center">
+                      <p className="text-base font-bold text-foreground">{String(value)}</p>
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {Array.isArray(analysisResult.classifications) &&
+                  (analysisResult.classifications as Array<{ filename: string; doc_type: string; confidence: number }>).length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Classifications</p>
+                    {(analysisResult.classifications as Array<{ filename: string; doc_type: string; confidence: number }>).map((c, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground truncate max-w-[55%]">{c.filename}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-medium text-foreground">{c.doc_type}</span>
+                          <span className="text-muted-foreground">{Math.round(c.confidence * 100)}%</span>
+                        </div>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
+                )}
+
+                {!!analysisResult.overall_score && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-sm text-muted-foreground">Deal Score:</span>
+                    <span className="text-xl font-bold text-foreground">{String(analysisResult.overall_score)}</span>
+                    <span className="text-xs text-muted-foreground">/ 100</span>
+                  </div>
+                )}
+
+                {!!analysisResult.deal_id && (
+                  <p className="text-xs font-mono text-muted-foreground">ID: {String(analysisResult.deal_id)}</p>
+                )}
+
+                {Array.isArray(analysisResult.errors) && (analysisResult.errors as string[]).length > 0 && (
+                  <div className="space-y-1 pt-1 border-t border-border">
+                    <p className="text-xs font-medium text-destructive">Pipeline Errors</p>
+                    {(analysisResult.errors as string[]).map((e, i) => (
+                      <p key={i} className="text-xs text-destructive">{String(e)}</p>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
