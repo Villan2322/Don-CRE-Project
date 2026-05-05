@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-// Python backend URL - in production this is the same domain via experimentalServices
-const BACKEND_URL = process.env.BACKEND_URL || ''
+// Python backend URL - experimentalServices routes /backend/* to Python FastAPI
+// We need a full URL for fetch() - use the current deployment URL
+function getBackendUrl(): string {
+  if (process.env.BACKEND_URL) return process.env.BACKEND_URL
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return 'http://localhost:8000'
+}
 
 /**
  * Transform raw pipeline result to frontend DealAnalysis format
@@ -605,8 +610,10 @@ export async function POST(request: NextRequest) {
         backendFormData.append('files', file)
       }
       
-      // Call Python backend - /api prefix routes to Python via experimentalServices
-      const backendResponse = await fetch(`${BACKEND_URL}/api/analyze`, {
+      // Call Python backend - /backend prefix routes to Python via experimentalServices
+      const backendUrl = getBackendUrl()
+      console.log('[v0] Calling Python backend at:', `${backendUrl}/backend/analyze`)
+      const backendResponse = await fetch(`${backendUrl}/backend/analyze`, {
         method: 'POST',
         body: backendFormData,
       })
@@ -616,7 +623,7 @@ export async function POST(request: NextRequest) {
         
         // Get full deal data if we got a deal_id back
         if (backendResult.deal_id) {
-          const dealResponse = await fetch(`${BACKEND_URL}/api/deals/${backendResult.deal_id}/raw`)
+          const dealResponse = await fetch(`${backendUrl}/backend/deals/${backendResult.deal_id}/raw`)
           if (dealResponse.ok) {
             const rawData = await dealResponse.json()
             const analysis = transformPipelineResult(rawData, documents)
