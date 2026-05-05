@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
 // DEPLOYED PYTHON BACKEND URL - hardcoded to always work
-const DEPLOYED_BACKEND = 'https://v0-cre-project-9izjq8l39-anthony-vs-projects-23a0e41a.vercel.app'
+const DEPLOYED_BACKEND = 'https://v0-cre-project-mpwm6znab-anthony-vs-projects-23a0e41a.vercel.app'
 
 function getBackendUrl(request?: NextRequest): string {
   // Always use the deployed backend URL
@@ -604,44 +604,43 @@ export async function POST(request: NextRequest) {
       type: 'RENT_ROLL',
     }))
     
-    // Try to call Python backend first
-    try {
-      // Create FormData for Python backend
-      const backendFormData = new FormData()
-      backendFormData.append('deal_name', dealName)
-      for (const file of files) {
-        backendFormData.append('files', file)
-      }
-      
-      // Call Python backend - /backend prefix routes to Python via experimentalServices
-      const backendUrl = getBackendUrl(request)
-      console.log('[v0] Calling Python backend at:', `${backendUrl}/backend/analyze`)
-      const backendResponse = await fetch(`${backendUrl}/backend/analyze`, {
-        method: 'POST',
-        body: backendFormData,
-      })
-      
-      if (backendResponse.ok) {
-        const backendResult = await backendResponse.json()
-        
-        // Get full deal data if we got a deal_id back
-        if (backendResult.deal_id) {
-          const dealResponse = await fetch(`${backendUrl}/backend/deals/${backendResult.deal_id}/raw`)
-          if (dealResponse.ok) {
-            const rawData = await dealResponse.json()
-            const analysis = transformPipelineResult(rawData, documents)
-            analysis.dealName = dealName
-            
-            return NextResponse.json({
-              success: true,
-              analysis,
-              source: 'python_backend',
-            })
-          }
-        }
-        
-        // Transform the direct response if no deal_id
-        const analysis = transformPipelineResult(backendResult, documents)
+    // Create FormData for Python backend
+    const backendFormData = new FormData()
+    backendFormData.append('deal_name', dealName)
+    for (const file of files) {
+      backendFormData.append('files', file)
+    }
+    
+    // Call Python backend - /backend prefix routes to Python via experimentalServices
+    const backendUrl = getBackendUrl(request)
+    console.log('[v0] Calling Python backend at:', `${backendUrl}/backend/analyze`)
+    console.log('[v0] Files:', files.map(f => f.name).join(', '))
+    
+    const backendResponse = await fetch(`${backendUrl}/backend/analyze`, {
+      method: 'POST',
+      body: backendFormData,
+    })
+    
+    if (!backendResponse.ok) {
+      const errorText = await backendResponse.text()
+      console.error('[v0] Backend error:', backendResponse.status, errorText)
+      return NextResponse.json(
+        { error: `Backend error: ${backendResponse.status} - ${errorText}` },
+        { status: backendResponse.status }
+      )
+    }
+    
+    const backendResult = await backendResponse.json()
+    console.log('[v0] Backend response:', JSON.stringify(backendResult).substring(0, 500))
+    
+    // Get full deal data if we got a deal_id back
+    if (backendResult.deal_id) {
+      console.log('[v0] Fetching deal data for:', backendResult.deal_id)
+      const dealResponse = await fetch(`${backendUrl}/backend/deals/${backendResult.deal_id}/raw`)
+      if (dealResponse.ok) {
+        const rawData = await dealResponse.json()
+        console.log('[v0] Raw deal data keys:', Object.keys(rawData))
+        const analysis = transformPipelineResult(rawData, documents)
         analysis.dealName = dealName
         
         return NextResponse.json({
@@ -649,21 +648,19 @@ export async function POST(request: NextRequest) {
           analysis,
           source: 'python_backend',
         })
+      } else {
+        console.error('[v0] Failed to fetch deal data:', dealResponse.status)
       }
-    } catch (backendError) {
-      console.error('Python backend error, falling back to mock:', backendError)
     }
     
-    // Fallback to mock analysis if Python backend is unavailable
-    const analysis = generateAnalysis(documents)
-    if (dealName) {
-      analysis.dealName = dealName
-    }
+    // Transform the direct response if no deal_id
+    const analysis = transformPipelineResult(backendResult, documents)
+    analysis.dealName = dealName
     
     return NextResponse.json({
       success: true,
       analysis,
-      source: 'mock_fallback',
+      source: 'python_backend',
     })
   } catch (error) {
     console.error('Analysis error:', error)
