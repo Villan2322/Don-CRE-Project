@@ -11,14 +11,18 @@ function getBackendUrl(request?: NextRequest): string {
   if (request) {
     const host = request.headers.get('host')
     const protocol = request.headers.get('x-forwarded-proto') || 'https'
-    if (host) return `${protocol}://${host}`
+    // Only use host if it's a Vercel deployment (not localhost/v0 preview)
+    if (host && host.includes('vercel.app')) {
+      return `${protocol}://${host}`
+    }
   }
   
   // 3. VERCEL_URL for build-time/edge cases
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
   
-  // 4. Local development fallback
-  return 'http://localhost:8000'
+  // 4. For V0 preview and local dev, use the deployed Vercel backend
+  // This allows testing the real Python backend from V0 preview
+  return 'https://v0-cre-project-9izjq8l39-anthony-vs-projects-23a0e41a.vercel.app'
 }
 
 /**
