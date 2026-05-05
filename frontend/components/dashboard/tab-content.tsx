@@ -88,9 +88,9 @@ function SnapshotTab({ deal }: { deal: DealAnalysis }) {
       {deal.rsfReconciliation.alertTriggered && <RSFAlert rsf={deal.rsfReconciliation} />}
       <MetricsGrid deal={deal} />
       <div className="grid gap-6 lg:grid-cols-3">
-        <ScoreHistoryChart />
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <ScoreHistoryChart deal={deal} />
+        <IncomeConcentrationChart deal={deal} />
+        <WALTTimelineChart deal={deal} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <RedFlagsList flags={deal.redFlags} limit={3} />
@@ -281,8 +281,8 @@ function RiskTab({ deal }: { deal: DealAnalysis }) {
         <WhatToGetNext items={deal.whatToGetNext} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <IncomeConcentrationChart deal={deal} />
+        <WALTTimelineChart deal={deal} />
       </div>
     </div>
   )

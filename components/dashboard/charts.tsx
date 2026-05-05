@@ -13,11 +13,102 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts'
-import { scoreHistory, incomeConcentration, waltTimeline } from '@/lib/mock-data'
+import { DealAnalysis } from '@/lib/types'
 
-export function ScoreHistoryChart() {
+// Generate income concentration data from tenants
+function generateIncomeConcentration(tenants: DealAnalysis['tenants']): { name: string; value: number; fill: string }[] {
+  if (!tenants || tenants.length === 0) return []
+  
+  const colors = [
+    'oklch(0.60 0.18 250)',  // Blue
+    'oklch(0.65 0.18 145)',  // Green
+    'oklch(0.55 0.22 25)',   // Orange
+    'oklch(0.60 0.15 320)',  // Purple
+    'oklch(0.45 0 0)',       // Gray for "Other"
+  ]
+  
+  // Calculate total annual rent
+  const totalRent = tenants.reduce((sum, t) => sum + (t.annualRent || 0), 0)
+  if (totalRent === 0) return []
+  
+  // Sort by annual rent descending
+  const sorted = [...tenants].sort((a, b) => (b.annualRent || 0) - (a.annualRent || 0))
+  
+  // Take top 4 tenants, group rest as "Other"
+  const top4 = sorted.slice(0, 4)
+  const others = sorted.slice(4)
+  const otherTotal = others.reduce((sum, t) => sum + (t.annualRent || 0), 0)
+  
+  const result = top4.map((t, i) => ({
+    name: t.name.length > 15 ? t.name.substring(0, 15) + '...' : t.name,
+    value: Math.round((t.annualRent / totalRent) * 100),
+    fill: colors[i],
+  }))
+  
+  if (otherTotal > 0) {
+    result.push({
+      name: 'Other',
+      value: Math.round((otherTotal / totalRent) * 100),
+      fill: colors[4],
+    })
+  }
+  
+  return result
+}
+
+// Generate WALT timeline from tenants
+function generateWaltTimeline(tenants: DealAnalysis['tenants']): { month: string; atRisk: number; secure: number }[] {
+  if (!tenants || tenants.length === 0) return []
+  
+  const now = new Date()
+  const periods = [
+    { label: '0-12mo', min: 0, max: 12 },
+    { label: '12-24mo', min: 12, max: 24 },
+    { label: '24-36mo', min: 24, max: 36 },
+    { label: '36-48mo', min: 36, max: 48 },
+    { label: '48mo+', min: 48, max: Infinity },
+  ]
+  
+  return periods.map(period => {
+    const tenantsInPeriod = tenants.filter(t => {
+      const months = t.monthsRemaining
+      if (months === null || months === undefined) return period.min === 0 // Unknown = at risk
+      return months >= period.min && months < period.max
+    })
+    
+    const atRisk = tenantsInPeriod
+      .filter(t => t.monthsRemaining === null || t.monthsRemaining < 12)
+      .reduce((sum, t) => sum + (t.annualRent || 0), 0)
+    
+    const secure = tenantsInPeriod
+      .filter(t => t.monthsRemaining !== null && t.monthsRemaining >= 12)
+      .reduce((sum, t) => sum + (t.annualRent || 0), 0)
+    
+    return {
+      month: period.label,
+      atRisk,
+      secure,
+    }
+  })
+}
+
+// Generate score history (for now just current score as single point)
+function generateScoreHistory(deal: DealAnalysis): { date: string; score: number; documents: number }[] {
+  if (!deal || !deal.submittedAt) return []
+  
+  return [
+    { date: deal.submittedAt, score: deal.score, documents: deal.documents?.length || 0 },
+  ]
+}
+
+interface ChartProps {
+  deal?: DealAnalysis
+}
+
+export function ScoreHistoryChart({ deal }: ChartProps) {
+  const scoreHistory = deal ? generateScoreHistory(deal) : []
+  
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
@@ -82,7 +173,23 @@ export function ScoreHistoryChart() {
   )
 }
 
-export function IncomeConcentrationChart() {
+export function IncomeConcentrationChart({ deal }: ChartProps) {
+  const incomeConcentration = deal ? generateIncomeConcentration(deal.tenants) : []
+  
+  if (incomeConcentration.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4">
+          <h3 className="font-semibold">Income Concentration</h3>
+          <p className="text-xs text-muted-foreground">Revenue distribution by tenant</p>
+        </div>
+        <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+          No tenant data available
+        </div>
+      </div>
+    )
+  }
+  
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
@@ -130,7 +237,23 @@ export function IncomeConcentrationChart() {
   )
 }
 
-export function WALTTimelineChart() {
+export function WALTTimelineChart({ deal }: ChartProps) {
+  const waltTimeline = deal ? generateWaltTimeline(deal.tenants) : []
+  
+  if (waltTimeline.length === 0 || waltTimeline.every(p => p.atRisk === 0 && p.secure === 0)) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-4">
+          <h3 className="font-semibold">Lease Expiry Timeline</h3>
+          <p className="text-xs text-muted-foreground">Income at risk over time</p>
+        </div>
+        <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+          No lease expiry data available
+        </div>
+      </div>
+    )
+  }
+  
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
