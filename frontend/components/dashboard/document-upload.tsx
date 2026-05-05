@@ -134,10 +134,27 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     setIsAnalyzing(true)
     
     try {
+      // Build FormData with actual files
+      const formData = new FormData()
+      
+      // Extract deal name from first file
+      const firstFile = files[0]?.file
+      const dealName = firstFile?.name
+        .replace(/\.(pdf|xlsx|xls|csv)$/i, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\b(rent roll|lease|boma|feb|jan|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4}|\(\d+\))/gi, '')
+        .trim() || 'Unknown Property'
+      
+      formData.append('dealName', dealName)
+      
+      // Append all completed files
+      for (const uploadedFile of files.filter(f => f.status === 'completed' && f.file)) {
+        formData.append('files', uploadedFile.file)
+      }
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documents: uploadedDocuments }),
+        body: formData,
       })
       
       if (!response.ok) {

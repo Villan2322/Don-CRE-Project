@@ -1,7 +1,210 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-// Simulates AI agent processing - in production this would call the Python backend
+// Python backend URL - in production this is the same domain via experimentalServices
+const BACKEND_URL = process.env.BACKEND_URL || ''
+
+/**
+ * Transform raw pipeline result to frontend DealAnalysis format
+ */
+function transformPipelineResult(rawResult: Record<string, unknown>, documents: { id: string; filename: string; type: string }[]): DealAnalysis {
+  const dealId = (rawResult.deal_id as string) || `deal-${Date.now()}`
+  const dealName = (rawResult.deal_name as string) || 'Unknown Property'
+  const now = new Date().toISOString()
+  
+  // Extract synthesis data
+  const synthesis = (rawResult.synthesis as Record<string, unknown>) || {}
+  const scoreSummary = (rawResult.score_summary as Record<string, unknown>) || {}
+  const rsfReconciliation = (rawResult.rsf_reconciliation as Record<string, unknown>) || {}
+  const redFlagsResult = (rawResult.red_flags_result as Record<string, unknown>) || {}
+  const extractions = (rawResult.extractions as Array<Record<string, unknown>>) || []
+  
+  // Get score data
+  const overallScore = (scoreSummary.overall as number) || (synthesis.deal_score as Record<string, unknown>)?.overall_score as number || 20
+  const subScores = (scoreSummary.sub_scores as Record<string, number>) || (synthesis.deal_score as Record<string, unknown>)?.sub_scores as Record<string, number> || {}
+  
+  // Determine tier
+  const tier = overallScore >= 80 ? 'GREEN' : overallScore >= 60 ? 'YELLOW' : overallScore >= 40 ? 'ORANGE' : 'RED'
+  const dealReadiness = overallScore >= 80 ? 'Proceed with confidence' : 
+                        overallScore >= 60 ? 'Proceed with conditions' : 
+                        overallScore >= 40 ? 'Material gaps' : 'Insufficient data'
+  
+  // Extract tenants from rent roll extractions
+  const tenants: Tenant[] = []
+  let totalAnnualRent = 0
+  
+  for (const extraction of extractions) {
+    if (extraction.doc_type === 'RENT_ROLL' || extraction.doc_type === 'RENT_ROLL_XLSX') {
+      const extractedData = (extraction.extraction as Record<string, unknown>) || {}
+      const extractedTenants = (extractedData.tenants as Array<Record<string, unknown>>) || []
+      
+      for (let i = 0; i < extractedTenants.length; i++) {
+        const t = extractedTenants[i]
+        const annualRent = (t.annual_base_rent as number) || ((t.monthly_base_rent as number) || 0) * 12
+        totalAnnualRent += annualRent
+        
+        tenants.push({
+          id: `t-${i + 1}`,
+          name: (t.tenant_name as string) || 'Unknown',
+          suite: (t.suite as string) || '',
+          rsf: (t.rsf as number) || 0,
+          bomaRsf: (t.boma_rsf as number) || (t.rsf as number) || 0,
+          rsfDelta: ((t.boma_rsf as number) || 0) - ((t.rsf as number) || 0),
+          monthlyRent: (t.monthly_base_rent as number) || (t.total_monthly as number) || 0,
+          annualRent: annualRent,
+          rentPSF: (t.rent_psf as number) || 0,
+          leaseStart: (t.lease_start as string) || '',
+          leaseExpiry: (t.lease_end as string) || null,
+          monthsRemaining: calculateMonthsRemaining(t.lease_end as string),
+          incomeConcentration: 0, // Calculate after all tenants are added
+          riskLevel: calculateRiskLevel(t.lease_end as string, (t.ar_balance as number) || 0),
+          arStatus: ((t.ar_balance as number) || 0) > 0 ? 'DELINQUENT' : 'CURRENT',
+          arBalance: (t.ar_balance as number) || 0,
+        })
+      }
+    }
+  }
+  
+  // Calculate income concentration
+  if (totalAnnualRent > 0) {
+    for (const tenant of tenants) {
+      tenant.incomeConcentration = Math.round((tenant.annualRent / totalAnnualRent) * 100)
+    }
+  }
+  
+  // Extract RSF reconciliation data
+  const rsfRecon = (synthesis.rsf_reconciliation as Record<string, unknown>) || rsfReconciliation || {}
+  const sources = (rsfRecon.sources as Record<string, number>) || {}
+  const bomaTotalSF = sources.BOMA || (rsfRecon.boma_total as number) || 0
+  const rentRollOccupiedSF = sources.RENT_ROLL || (rsfRecon.rent_roll_total as number) || tenants.reduce((sum, t) => sum + t.rsf, 0)
+  const deltaSF = (rsfRecon.variance_rent_roll_vs_boma as number) || (bomaTotalSF - rentRollOccupiedSF)
+  const deltaPercent = (rsfRecon.variance_percentage as number) || (bomaTotalSF > 0 ? (deltaSF / bomaTotalSF) * 100 : 0)
+  
+  // Extract red flags
+  const rawRedFlags = (redFlagsResult.red_flags as Array<Record<string, unknown>>) || 
+                      (synthesis.red_flags as Array<Record<string, unknown>>) || []
+  const redFlags: RedFlag[] = rawRedFlags.map((rf, i) => ({
+    id: `rf-${i + 1}`,
+    severity: ((rf.severity as string) || 'MEDIUM').toUpperCase() as 'HIGH' | 'MEDIUM' | 'LOW',
+    category: (rf.flag as string) || (rf.category as string) || 'Unknown',
+    description: (rf.flag as string) || (rf.description as string) || '',
+    impact: (rf.impact as string) || '',
+    resolution: (rf.resolution as string) || undefined,
+  }))
+  
+  // Extract what to get next
+  const rawWhatToGetNext = (synthesis.what_to_get_next as Array<Record<string, unknown> | string>) || []
+  const whatToGetNext: string[] = rawWhatToGetNext.map(item => 
+    typeof item === 'string' ? item : (item.document as string) || ''
+  ).filter(Boolean)
+  
+  // Financial summary
+  const financialSummary = (synthesis.financial_summary as Record<string, unknown>) || {}
+  const noi = (financialSummary.noi as number) || Math.round(totalAnnualRent * 0.72)
+  const occupancyPct = (financialSummary.occupancy_pct as number) || 
+                       (bomaTotalSF > 0 ? (rentRollOccupiedSF / bomaTotalSF) * 100 : 0)
+  
+  // WALT
+  const leaseAudit = (synthesis.lease_audit as Record<string, unknown>) || {}
+  const walt = (leaseAudit.walt_months as number) || 
+               (tenants.length > 0 ? Math.round(tenants.reduce((sum, t) => sum + (t.monthsRemaining || 0), 0) / tenants.length) : 0)
+  
+  // Create lease abstracts from tenants
+  const leaseAbstracts: LeaseAbstract[] = tenants.map((t, i) => ({
+    id: `la-${i + 1}`,
+    tenantName: t.name,
+    suite: t.suite,
+    rsf: t.rsf,
+    commencementDate: t.leaseStart,
+    expirationDate: t.leaseExpiry,
+    baseRent: t.annualRent,
+    escalation: 'Unknown',
+    expenseStructure: 'NNN' as const,
+    camCap: null,
+    renewalOptions: null,
+    tiAllowance: null,
+    remeasurementRights: false,
+    missingFields: ['escalation', 'renewalOptions', 'camCap'],
+  }))
+  
+  // Create document records
+  const processedDocs: UploadedDocument[] = documents.map((d) => ({
+    id: d.id,
+    filename: d.filename,
+    type: (d.type.toUpperCase().replace(/ /g, '_') || 'RENT_ROLL') as UploadedDocument['type'],
+    uploadedAt: now,
+    pageCount: 1,
+    status: 'PROCESSED' as const,
+  }))
+  
+  // RSF recovery
+  const rsfRecovery = (synthesis.rsf_recovery_opportunity as Record<string, unknown>) || {}
+  const estimatedAnnualRecovery = (rsfRecovery.estimated_annual_recovery as number) || Math.round(deltaSF * 11.5)
+  
+  const analysis: DealAnalysis = {
+    id: dealId,
+    dealName: dealName,
+    propertyAddress: `${dealName}, FL`,
+    submittedAt: now,
+    score: overallScore,
+    tier: tier as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
+    dealReadiness: dealReadiness as DealAnalysis['dealReadiness'],
+    subScores: {
+      dataCompleteness: subScores.document_completeness || 4,
+      rsfAlignment: subScores.data_consistency || 6,
+      financialIntegrity: subScores.financial_health || 8,
+      leaseLeverage: subScores.lease_quality || 6,
+      riskProfile: subScores.risk_factors || 4,
+      documentCoverage: subScores.document_completeness || 4,
+    },
+    rsfReconciliation: {
+      bomaTotalSF,
+      rentRollOccupiedSF,
+      deltaSF,
+      deltaPercent,
+      estimatedAnnualRecovery,
+      alertTriggered: Math.abs(deltaPercent) > 5,
+    },
+    financialSummary: {
+      totalAnnualRent,
+      noi,
+      capRate: noi > 0 && bomaTotalSF > 0 ? (noi / (bomaTotalSF * 100)) * 100 : 0,
+      averageRentPSF: rentRollOccupiedSF > 0 ? totalAnnualRent / rentRollOccupiedSF : 0,
+      vacancy: 100 - occupancyPct,
+      arDelinquency: tenants.reduce((sum, t) => sum + t.arBalance, 0),
+    },
+    walt,
+    redFlags,
+    whatToGetNext,
+    tenants,
+    leaseAbstracts,
+    documents: processedDocs,
+  }
+  
+  return analysis
+}
+
+function calculateMonthsRemaining(leaseEnd: string | null): number | null {
+  if (!leaseEnd) return null
+  try {
+    const end = new Date(leaseEnd)
+    const now = new Date()
+    const months = (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth())
+    return Math.max(0, months)
+  } catch {
+    return null
+  }
+}
+
+function calculateRiskLevel(leaseEnd: string | null, arBalance: number): 'LOW' | 'MEDIUM' | 'HIGH' {
+  const monthsRemaining = calculateMonthsRemaining(leaseEnd)
+  if (arBalance > 0) return 'HIGH'
+  if (monthsRemaining !== null && monthsRemaining < 12) return 'HIGH'
+  if (monthsRemaining !== null && monthsRemaining < 24) return 'MEDIUM'
+  return 'LOW'
+}
+
+// Fallback mock generation for when Python backend is unavailable
 function generateAnalysis(documents: { id: string; filename: string; type: string }[]): DealAnalysis {
   const dealId = `deal-${Date.now()}`
   const now = new Date().toISOString()
@@ -306,30 +509,82 @@ function generateAnalysis(documents: { id: string; filename: string; type: strin
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { documents, dealName } = body
-
-    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+    const formData = await request.formData()
+    const dealName = formData.get('dealName') as string || 'Unknown Property'
+    const files = formData.getAll('files') as File[]
+    
+    if (!files || files.length === 0) {
       return NextResponse.json(
         { error: 'No documents provided for analysis' },
         { status: 400 }
       )
     }
-
-    // Simulate processing time for AI analysis
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    // Generate analysis
-    const analysis = generateAnalysis(documents)
     
-    // Override deal name if provided
+    // Build document list for fallback
+    const documents = files.map((f, i) => ({
+      id: `doc-${i}`,
+      filename: f.name,
+      type: 'RENT_ROLL',
+    }))
+    
+    // Try to call Python backend first
+    try {
+      // Create FormData for Python backend
+      const backendFormData = new FormData()
+      backendFormData.append('deal_name', dealName)
+      for (const file of files) {
+        backendFormData.append('files', file)
+      }
+      
+      // Call Python backend - /api prefix routes to Python via experimentalServices
+      const backendResponse = await fetch(`${BACKEND_URL}/api/analyze`, {
+        method: 'POST',
+        body: backendFormData,
+      })
+      
+      if (backendResponse.ok) {
+        const backendResult = await backendResponse.json()
+        
+        // Get full deal data if we got a deal_id back
+        if (backendResult.deal_id) {
+          const dealResponse = await fetch(`${BACKEND_URL}/api/deals/${backendResult.deal_id}/raw`)
+          if (dealResponse.ok) {
+            const rawData = await dealResponse.json()
+            const analysis = transformPipelineResult(rawData, documents)
+            analysis.dealName = dealName
+            
+            return NextResponse.json({
+              success: true,
+              analysis,
+              source: 'python_backend',
+            })
+          }
+        }
+        
+        // Transform the direct response if no deal_id
+        const analysis = transformPipelineResult(backendResult, documents)
+        analysis.dealName = dealName
+        
+        return NextResponse.json({
+          success: true,
+          analysis,
+          source: 'python_backend',
+        })
+      }
+    } catch (backendError) {
+      console.error('Python backend error, falling back to mock:', backendError)
+    }
+    
+    // Fallback to mock analysis if Python backend is unavailable
+    const analysis = generateAnalysis(documents)
     if (dealName) {
       analysis.dealName = dealName
     }
-
+    
     return NextResponse.json({
       success: true,
       analysis,
+      source: 'mock_fallback',
     })
   } catch (error) {
     console.error('Analysis error:', error)
