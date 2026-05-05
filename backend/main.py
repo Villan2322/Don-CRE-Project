@@ -1,8 +1,23 @@
+import os
 import fastapi
 import fastapi.middleware.cors
 from fastapi import UploadFile, File, Form, HTTPException
 from typing import Optional
 import uuid
+
+
+def configure_langsmith():
+    """Configure LangSmith tracing at runtime (Vercel serverless loads env vars late)."""
+    if os.environ.get("LANGSMITH_API_KEY"):
+        os.environ["LANGCHAIN_API_KEY"] = os.environ["LANGSMITH_API_KEY"]
+        os.environ["LANGCHAIN_TRACING_V2"] = os.environ.get("LANGSMITH_TRACING", "true")
+        project = os.environ.get("LANGSMITH_PROJECT", "cre-document-intelligence")
+        os.environ["LANGCHAIN_PROJECT"] = project.strip('"\'')
+        if os.environ.get("LANGSMITH_ENDPOINT"):
+            os.environ["LANGCHAIN_ENDPOINT"] = os.environ["LANGSMITH_ENDPOINT"]
+        print(f"[LANGSMITH] Tracing enabled for project: {os.environ['LANGCHAIN_PROJECT']}")
+    else:
+        print("[LANGSMITH] LANGSMITH_API_KEY not found - tracing disabled")
 
 from models.schemas import (
     UploadResponse,
@@ -103,6 +118,9 @@ async def analyze_deal(
     7. Red Flag Detection
     8. Risk Scoring
     """
+    # Configure LangSmith at runtime (Vercel loads env vars after module import)
+    configure_langsmith()
+    
     deal_id = str(uuid.uuid4())
     raw_files = {}
     content_types = {}
