@@ -12,12 +12,36 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
   const dealName = (rawResult.deal_name as string) || 'Unknown Property'
   const now = new Date().toISOString()
   
+  console.log('[v0] transformPipelineResult called with keys:', Object.keys(rawResult))
+  
   // Extract synthesis data
   const synthesis = (rawResult.synthesis as Record<string, unknown>) || {}
   const scoreSummary = (rawResult.score_summary as Record<string, unknown>) || {}
   const rsfReconciliation = (rawResult.rsf_reconciliation as Record<string, unknown>) || {}
   const redFlagsResult = (rawResult.red_flags_result as Record<string, unknown>) || {}
-  const extractions = (rawResult.extractions as Array<Record<string, unknown>>) || []
+  
+  // Try multiple paths for extractions
+  let extractions = (rawResult.extractions as Array<Record<string, unknown>>) || []
+  
+  // Also check synthesis.raw_extractions (grouped by doc_type)
+  if (extractions.length === 0 && synthesis.raw_extractions) {
+    console.log('[v0] Found raw_extractions in synthesis')
+    const rawExtractions = synthesis.raw_extractions as Record<string, Array<Record<string, unknown>>>
+    for (const docType of Object.keys(rawExtractions)) {
+      extractions.push(...rawExtractions[docType].map(e => ({ ...e, doc_type: docType })))
+    }
+  }
+  
+  // Also check rawResult.raw_extractions directly
+  if (extractions.length === 0 && rawResult.raw_extractions) {
+    console.log('[v0] Found raw_extractions in rawResult')
+    const rawExtractions = rawResult.raw_extractions as Record<string, Array<Record<string, unknown>>>
+    for (const docType of Object.keys(rawExtractions)) {
+      extractions.push(...rawExtractions[docType].map(e => ({ ...e, doc_type: docType })))
+    }
+  }
+  
+  console.log('[v0] Found', extractions.length, 'extractions')
   
   // Get score data
   const overallScore = (scoreSummary.overall as number) || (synthesis.deal_score as Record<string, unknown>)?.overall_score as number || 20
@@ -33,10 +57,17 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
   const tenants: Tenant[] = []
   let totalAnnualRent = 0
   
+  console.log('[v0] Extraction doc_types:', extractions.map(e => e.doc_type))
+  
   for (const extraction of extractions) {
+    console.log('[v0] Checking extraction:', extraction.doc_type, 'keys:', Object.keys(extraction))
+    
     if (extraction.doc_type === 'RENT_ROLL' || extraction.doc_type === 'RENT_ROLL_XLSX') {
       const extractedData = (extraction.extraction as Record<string, unknown>) || {}
+      console.log('[v0] RENT_ROLL extractedData keys:', Object.keys(extractedData))
+      
       const extractedTenants = (extractedData.tenants as Array<Record<string, unknown>>) || []
+      console.log('[v0] Found', extractedTenants.length, 'tenants in RENT_ROLL')
       
       for (let i = 0; i < extractedTenants.length; i++) {
         const t = extractedTenants[i]
@@ -66,6 +97,8 @@ function transformPipelineResult(rawResult: Record<string, unknown>, documents: 
   }
   
   // Calculate income concentration
+  console.log('[v0] Total tenants found:', tenants.length, 'totalAnnualRent:', totalAnnualRent)
+  
   if (totalAnnualRent > 0) {
     for (const tenant of tenants) {
       tenant.incomeConcentration = Math.round((tenant.annualRent / totalAnnualRent) * 100)
