@@ -236,7 +236,11 @@ function generateAnalysis(documents: { id: string; filename: string; type: strin
                        redFlags.filter(f => f.severity === 'MEDIUM').length * 4
   const score = Math.max(20, Math.min(95, baseScore + docBonus - flagPenalty))
 
-  const tier = score >= 75 ? 'GREEN' : score >= 50 ? 'YELLOW' : 'RED'
+  // 4-tier scoring system
+  const tier = score >= 80 ? 'GREEN' : score >= 60 ? 'YELLOW' : score >= 40 ? 'ORANGE' : 'RED'
+  const dealReadiness = score >= 80 ? 'Proceed with confidence' : 
+                        score >= 60 ? 'Proceed with conditions' : 
+                        score >= 40 ? 'Material gaps' : 'Insufficient data'
 
   // Create document records
   const processedDocs: UploadedDocument[] = documents.map((d) => ({
@@ -263,7 +267,8 @@ function generateAnalysis(documents: { id: string; filename: string; type: strin
     propertyAddress: `${propertyName}, FL`,
     submittedAt: now,
     score,
-    tier: tier as 'GREEN' | 'YELLOW' | 'RED',
+    tier: tier as 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED',
+    dealReadiness: dealReadiness as DealAnalysis['dealReadiness'],
     subScores: {
       dataCompleteness: Math.min(20, documents.length * 4),
       rsfAlignment: hasBoma ? 14 : 6,

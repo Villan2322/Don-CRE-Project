@@ -5,6 +5,7 @@ export interface DealAnalysis {
   submittedAt: string
   score: number
   tier: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'
+  dealReadiness: 'Proceed with confidence' | 'Proceed with conditions' | 'Material gaps' | 'Insufficient data'
   subScores: {
     dataCompleteness: number
     rsfAlignment: number

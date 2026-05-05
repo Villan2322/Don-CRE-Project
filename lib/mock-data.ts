@@ -7,6 +7,7 @@ export const mockDealAnalysis: DealAnalysis = {
   submittedAt: '2026-04-18T14:32:00Z',
   score: 66,
   tier: 'YELLOW',
+  dealReadiness: 'Proceed with conditions',
   subScores: {
     dataCompleteness: 16,
     rsfAlignment: 12,
