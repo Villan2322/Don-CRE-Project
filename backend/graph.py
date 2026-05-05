@@ -19,6 +19,7 @@ try:
     from .agents.rsf_reconciliation import RSFReconciliationAgent
     from .agents.red_flag_detection import RedFlagDetectionAgent
     from .agents.risk_scoring import RiskScoringAgent
+    from .agents.document_segmentation import DocumentSegmentationAgent
 except ImportError:
     from state import CREPipelineState, SingleDocumentState
     from agents.document_parsing import DocumentParsingAgent
@@ -29,9 +30,11 @@ except ImportError:
     from agents.rsf_reconciliation import RSFReconciliationAgent
     from agents.red_flag_detection import RedFlagDetectionAgent
     from agents.risk_scoring import RiskScoringAgent
+    from agents.document_segmentation import DocumentSegmentationAgent
 
 _parsing_agent = DocumentParsingAgent()
 _ocr_agent = OCRAgent()
+_segmentation_agent = DocumentSegmentationAgent()
 _extractor = UniversalExtractor()
 _synthesizer = SynthesisAgent()
 _arithmetic = ArithmeticVerificationAgent()
@@ -42,65 +45,171 @@ _risk_agent = RiskScoringAgent()
 
 
 async def ingest_documents(state: CREPipelineState) -> dict:
+    """
+    Ingest and parse documents. For multi-page PDFs, segment into logical sections.
+    Each segment becomes a separate document for downstream classification/extraction.
+    """
     raw_documents = []
     errors = []
+    
     for filename, file_bytes in state["raw_files"].items():
         content_type = state["file_content_types"].get(filename, "application/octet-stream")
-        doc_id = f"doc-{filename.replace(' ', '_')}-{id(file_bytes)}"
+        base_doc_id = f"doc-{filename.replace(' ', '_')}-{id(file_bytes)}"
+        
         try:
-            parse_result = _parsing_agent.check(filename=filename, file_content=file_bytes, content_type=content_type)
+            parse_result = _parsing_agent.check(
+                filename=filename, file_content=file_bytes, content_type=content_type
+            )
+            
             if not parse_result.is_parseable:
                 errors.append(f"{filename}: {parse_result.reason}")
                 continue
+            
+            # Extract text (with OCR if needed)
             extracted_text = ""
             ocr_performed = False
             ocr_confidence = None
+            
             if parse_result.needs_ocr:
-                ocr_result = await _ocr_agent.process(file_content=file_bytes, filename=filename, page_count=parse_result.page_count)
+                ocr_result = await _ocr_agent.process(
+                    file_content=file_bytes, filename=filename, 
+                    page_count=parse_result.page_count
+                )
                 ocr_performed = True
                 ocr_confidence = ocr_result.get("confidence")
+                
                 if not ocr_result.get("document_readable", False):
-                    errors.append(f"{filename}: OCR failed — {', '.join(ocr_result.get('ocr_issues_found', []))}")
+                    errors.append(
+                        f"{filename}: OCR failed — {', '.join(ocr_result.get('ocr_issues_found', []))}"
+                    )
                     continue
                 extracted_text = ocr_result.get("cleaned_text", "")
             else:
                 extracted_text = parse_result.extracted_text
-            raw_documents.append({
-                "doc_id": doc_id, "deal_name": state["deal_name"],
-                "filename": filename, "content_type": content_type,
-                "file_type": parse_result.file_type,
-                "extracted_text": extracted_text[:50000],
-                "page_count": parse_result.page_count,
-                "needs_ocr": parse_result.needs_ocr,
-                "ocr_performed": ocr_performed, "ocr_confidence": ocr_confidence,
-                "is_parseable": True, "parse_method": parse_result.method,
-                "parse_reason": parse_result.reason,
-            })
+            
+            # Check if this is a multi-page document that might contain multiple sections
+            should_segment = (
+                parse_result.page_count and parse_result.page_count > 3 and
+                parse_result.file_type == "pdf"
+            )
+            
+            if should_segment:
+                # Segment the document into logical sections
+                segments = await _segmentation_agent.segment_document(
+                    full_text=extracted_text,
+                    page_texts=None  # Let the agent split by page markers
+                )
+                
+                # Create a document entry for each segment
+                for idx, segment in enumerate(segments):
+                    seg_doc_id = f"{base_doc_id}-seg{idx+1}"
+                    seg_filename = f"{filename} [Segment {idx+1}: {segment.doc_type}]"
+                    
+                    raw_documents.append({
+                        "doc_id": seg_doc_id,
+                        "deal_name": state["deal_name"],
+                        "filename": seg_filename,
+                        "original_filename": filename,
+                        "content_type": content_type,
+                        "file_type": parse_result.file_type,
+                        "extracted_text": segment.text[:50000],
+                        "page_count": segment.end_page - segment.start_page + 1,
+                        "start_page": segment.start_page,
+                        "end_page": segment.end_page,
+                        "needs_ocr": parse_result.needs_ocr,
+                        "ocr_performed": ocr_performed,
+                        "ocr_confidence": ocr_confidence,
+                        "is_parseable": True,
+                        "parse_method": parse_result.method,
+                        "parse_reason": parse_result.reason,
+                        "segment_type_hint": segment.doc_type,
+                        "segment_confidence": segment.confidence,
+                        "is_segment": True,
+                    })
+            else:
+                # Single document, no segmentation needed
+                raw_documents.append({
+                    "doc_id": base_doc_id,
+                    "deal_name": state["deal_name"],
+                    "filename": filename,
+                    "original_filename": filename,
+                    "content_type": content_type,
+                    "file_type": parse_result.file_type,
+                    "extracted_text": extracted_text[:50000],
+                    "page_count": parse_result.page_count,
+                    "needs_ocr": parse_result.needs_ocr,
+                    "ocr_performed": ocr_performed,
+                    "ocr_confidence": ocr_confidence,
+                    "is_parseable": True,
+                    "parse_method": parse_result.method,
+                    "parse_reason": parse_result.reason,
+                    "is_segment": False,
+                })
+                
         except Exception as e:
             errors.append(f"{filename}: {str(e)}")
-    return {"raw_documents": raw_documents, "ingest_errors": errors, "pipeline_stage": "ingested"}
+    
+    return {
+        "raw_documents": raw_documents, 
+        "ingest_errors": errors, 
+        "pipeline_stage": "ingested"
+    }
 
 
 async def classify_documents(state: CREPipelineState) -> dict:
+    """
+    Classify each document (or segment) by type.
+    Uses segment type hints when available from segmentation.
+    """
     classified = []
     errors = []
 
     async def classify_one(doc):
         try:
+            # If this is a segment with a high-confidence type hint, use it
+            segment_hint = doc.get("segment_type_hint")
+            segment_conf = doc.get("segment_confidence", 0)
+            
+            if segment_hint and segment_hint != "UNKNOWN" and segment_conf > 0.7:
+                # Use the segment type hint directly
+                return {
+                    **doc, 
+                    "doc_type": segment_hint,
+                    "classification_confidence": segment_conf,
+                    "classification_reasoning": f"Segment auto-classified as {segment_hint} with confidence {segment_conf:.2f}",
+                    "classification_source": "segmentation"
+                }
+            
+            # Otherwise, run full classification
             result = await _extractor.classify_document(
-                text=doc["extracted_text"], filename=doc["filename"],
-                mime_type=doc.get("content_type"))
-            return {**doc, "doc_type": result["doc_type"],
-                    "classification_confidence": result["confidence"],
-                    "classification_reasoning": result.get("reasoning", "")}
+                text=doc["extracted_text"], 
+                filename=doc["filename"],
+                mime_type=doc.get("content_type")
+            )
+            
+            return {
+                **doc, 
+                "doc_type": result["doc_type"],
+                "classification_confidence": result["confidence"],
+                "classification_reasoning": result.get("reasoning", ""),
+                "classification_source": "llm"
+            }
         except Exception as e:
             errors.append(f"{doc['filename']}: {str(e)}")
-            return {**doc, "doc_type": "UNKNOWN", "classification_confidence": 0.0,
-                    "classification_reasoning": str(e)}
+            return {
+                **doc, 
+                "doc_type": "UNKNOWN", 
+                "classification_confidence": 0.0,
+                "classification_reasoning": str(e),
+                "classification_source": "error"
+            }
 
     results = await asyncio.gather(*[classify_one(doc) for doc in state["raw_documents"]])
-    return {"classified_documents": list(results), "classification_errors": errors,
-            "pipeline_stage": "classified"}
+    return {
+        "classified_documents": list(results), 
+        "classification_errors": errors,
+        "pipeline_stage": "classified"
+    }
 
 
 def fan_out_extractions(state: CREPipelineState) -> list[Send]:
