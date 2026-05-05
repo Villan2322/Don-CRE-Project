@@ -1,7 +1,12 @@
+import os
 import asyncio
 from datetime import datetime, timezone
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
+
+# Enable LangSmith tracing
+os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+os.environ.setdefault("LANGCHAIN_PROJECT", "cre-document-intelligence")
 
 from .state import CREPipelineState, SingleDocumentState
 from .agents.document_parsing import DocumentParsingAgent
