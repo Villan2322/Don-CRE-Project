@@ -87,10 +87,17 @@ async def ingest_documents(state: CREPipelineState) -> dict:
             else:
                 extracted_text = parse_result.extracted_text
             
-            # Check if this is a multi-page document that might contain multiple sections
+            # Check if this is a multi-section document that should be segmented
+            # Segment if: PDF with 3+ pages OR text with 5000+ chars with section markers
+            has_section_markers = any(marker in extracted_text.lower() for marker in [
+                'collection report', 'cash receipts', 'disbursements', 
+                'ending receivables', 'lease recap', 'rent roll', 'ar aging',
+                'income and expense', 'sales volume'
+            ])
+            
             should_segment = (
-                parse_result.page_count and parse_result.page_count > 3 and
-                parse_result.file_type == "pdf"
+                (parse_result.page_count and parse_result.page_count > 3 and parse_result.file_type == "pdf") or
+                (len(extracted_text) > 5000 and has_section_markers)
             )
             
             if should_segment:

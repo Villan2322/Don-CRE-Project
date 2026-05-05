@@ -29,33 +29,31 @@ class DocumentSegment:
     confidence: float
 
 
+# Pattern priority: Higher priority patterns are checked first within each page
+# COVER_LETTER should only be detected on first page and requires specific signatures
 SEGMENT_PATTERNS = {
-    "COVER_LETTER": [
-        r"monthly\s+report",
-        r"dear\s+\w+:",
-        r"enclosed\s+is",
-        r"very\s+truly\s+yours",
-    ],
     "RENT_ROLL": [
-        r"collection\s+report",
-        r"tenant\s+name.*rent.*paid.*balance",
-        r"minimum\s+rent.*percentage\s+rent",
-        r"sales\s+tax.*rent.*common\s+area",
-        r"unpaid.*balance",
+        # Actual rent roll table headers (more specific than just "collection report")
+        r"tenant\s+name\s+.*\s+rent\s+.*\s+(paid|balance)",
+        r"(plaza\s+building|strip\s+center).*tenant\s+name",
+        r"sales\s+tax\s+rent\s+minimum\s+percentage",
+        r"minimum\s+rent\s+percentage\s+rent\s+common",
+        r"report\s+as\s+of.*tenant\s+name",
     ],
     "DISBURSEMENTS": [
         r"cash\s+receipts?\s+(and|&)\s+disbursements?",
-        r"check\s*#.*vendor.*amount",
+        r"check\s+register",
         r"total\s+disbursements",
         r"cash\s+ending\s+balance",
+        r"date\s+vendor\s+.*amount",
     ],
     "ENDING_RECEIVABLES": [
-        r"ending\s+receivables",
+        r"ending\s+receivables\s+as\s+of",
         r"receivables\s+as\s+of",
-        r"tenant\s+name.*sales\s+tax.*rent.*total",
+        r"ending\s+receivables",
     ],
     "INCOME_EXPENSE": [
-        r"income\s+(and|&)\s+expense",
+        r"income\s+(and|&)\s+expense\s+summary",
         r"operating\s+statement",
         r"net\s+operating\s+income",
         r"total\s+income.*total\s+expenses",
@@ -63,13 +61,19 @@ SEGMENT_PATTERNS = {
     "LEASE_RECAP": [
         r"lease\s+recap",
         r"lease\s+abstract",
-        r"commencement.*expiration.*rent",
-        r"tenant.*suite.*sf.*term",
+        r"commencement.*expiration.*base\s+rent",
+        r"tenant\s+.*suite\s+.*sf\s+.*term",
     ],
     "SALES_VOLUME": [
-        r"sales\s+volume",
+        r"sales\s+volume\s+report",
         r"gross\s+sales",
         r"monthly\s+sales.*ytd\s+sales",
+    ],
+    "COVER_LETTER": [
+        # Cover letter must have greeting AND signature - very specific
+        r"dear\s+\w+:.*very\s+truly\s+yours",
+        r"dear\s+\w+:.*sincerely",
+        r"enclosed\s+is.*monthly\s+report.*dear",
     ],
 }
 
@@ -111,80 +115,134 @@ Return JSON with segments array, each containing:
     def segment_by_patterns(self, text: str, page_texts: list[str]) -> list[DocumentSegment]:
         """
         Use regex patterns to identify document segments.
-        
-        Args:
-            text: Full document text
-            page_texts: List of text per page
-            
-        Returns:
-            List of identified segments
+        Improved to handle:
+        1. Cover letters that mention multiple section types
+        2. Tabular data without explicit headers (rent rolls)
+        3. Multi-section pages
         """
         segments = []
-        text_lower = text.lower()
         
-        # Track which pages contain which document types
-        page_types: dict[int, list[tuple[str, float]]] = {i: [] for i in range(len(page_texts))}
+        # First, check if first page is a cover letter (has greeting + signature)
+        first_page_lower = page_texts[0].lower() if page_texts else ""
+        is_cover_letter = (
+            ("dear " in first_page_lower or "enclosed" in first_page_lower) and 
+            ("truly yours" in first_page_lower or "sincerely" in first_page_lower)
+        )
         
-        for page_idx, page_text in enumerate(page_texts):
-            page_lower = page_text.lower()
-            
-            for doc_type, patterns in SEGMENT_PATTERNS.items():
-                matches = 0
-                for pattern in patterns:
-                    if re.search(pattern, page_lower):
-                        matches += 1
-                
-                if matches > 0:
-                    confidence = min(matches / len(patterns) * 1.5, 1.0)
-                    page_types[page_idx].append((doc_type, confidence))
+        if is_cover_letter:
+            # Cover letter is ONLY the first page
+            segments.append(DocumentSegment(
+                segment_id="seg-1",
+                doc_type="COVER_LETTER",
+                start_page=1,
+                end_page=1,
+                title="Cover Letter",
+                text=page_texts[0],
+                confidence=0.9,
+            ))
+            # Continue processing from page 2
+            remaining_pages = page_texts[1:] if len(page_texts) > 1 else []
+            page_offset = 1
+        else:
+            remaining_pages = page_texts
+            page_offset = 0
         
-        # Consolidate consecutive pages of the same type
+        # Now classify remaining pages by content, not by header mentions
         current_type: Optional[str] = None
         current_start: int = 0
         current_confidence: float = 0
         current_text: list[str] = []
         
-        for page_idx in range(len(page_texts)):
-            page_matches = page_types[page_idx]
+        for page_idx, page_text in enumerate(remaining_pages):
+            page_lower = page_text.lower()
+            detected_type = None
+            best_confidence = 0
             
-            if page_matches:
-                # Get the highest confidence match for this page
-                best_match = max(page_matches, key=lambda x: x[1])
-                best_type, confidence = best_match
+            # Check for specific section markers (not just mentions)
+            # RENT_ROLL: Look for actual tenant data tables
+            if re.search(r'(plaza\s+building|strip|tenant\s+name).*\n.*\d+\.\d{2}', page_lower, re.DOTALL):
+                detected_type = "RENT_ROLL"
+                best_confidence = 0.85
+            elif re.search(r'sales\s+tax\s+rent\s+(minimum|percentage)', page_lower):
+                detected_type = "RENT_ROLL"
+                best_confidence = 0.85
+            elif re.search(r'(minimum|percentage)\s+.*common.*area\s+maint', page_lower):
+                detected_type = "RENT_ROLL"
+                best_confidence = 0.8
+            
+            # DISBURSEMENTS: Check register or cash disbursements
+            if not detected_type and re.search(r'(check\s+register|total\s+disbursements|cash\s+ending)', page_lower):
+                detected_type = "DISBURSEMENTS"
+                best_confidence = 0.85
+            
+            # ENDING_RECEIVABLES: AR aging
+            if not detected_type and re.search(r'ending\s+receivables\s+(as\s+of|report)', page_lower):
+                detected_type = "ENDING_RECEIVABLES"
+                best_confidence = 0.85
+            
+            # LEASE_RECAP
+            if not detected_type and re.search(r'lease\s+recap|commencement.*expiration', page_lower):
+                detected_type = "LEASE_RECAP"
+                best_confidence = 0.85
+            
+            # SALES_VOLUME
+            if not detected_type and re.search(r'sales\s+volume\s+report|gross\s+sales', page_lower):
+                detected_type = "SALES_VOLUME"
+                best_confidence = 0.85
+            
+            # INCOME_EXPENSE
+            if not detected_type and re.search(r'income\s+(and|&)\s+expense|operating\s+statement', page_lower):
+                detected_type = "INCOME_EXPENSE"
+                best_confidence = 0.85
+            
+            # If no specific detection, check for tabular data patterns
+            if not detected_type:
+                # Count numeric values and columns - sign of tabular data
+                numbers = re.findall(r'\d+\.\d{2}', page_text)
+                if len(numbers) > 10:
+                    # Lots of decimal numbers suggests financial table
+                    # Check if previous type was a table type
+                    if current_type in ["RENT_ROLL", "ENDING_RECEIVABLES"]:
+                        detected_type = current_type
+                        best_confidence = 0.7
+                    else:
+                        detected_type = "RENT_ROLL"  # Default to rent roll for tabular data
+                        best_confidence = 0.6
+            
+            # Handle type changes
+            if detected_type and detected_type != current_type:
+                # Save previous segment
+                if current_type and current_text:
+                    segments.append(DocumentSegment(
+                        segment_id=f"seg-{len(segments)+1}",
+                        doc_type=current_type,
+                        start_page=current_start + page_offset + 1,
+                        end_page=page_idx + page_offset,
+                        title=self._extract_title(current_text[0]),
+                        text="\n".join(current_text),
+                        confidence=current_confidence,
+                    ))
                 
-                if best_type != current_type:
-                    # Save previous segment if exists
-                    if current_type and current_text:
-                        segments.append(DocumentSegment(
-                            segment_id=f"seg-{len(segments)+1}",
-                            doc_type=current_type,
-                            start_page=current_start + 1,  # 1-indexed
-                            end_page=page_idx,  # 1-indexed (exclusive)
-                            title=self._extract_title(current_text[0]),
-                            text="\n".join(current_text),
-                            confidence=current_confidence,
-                        ))
-                    
-                    # Start new segment
-                    current_type = best_type
-                    current_start = page_idx
-                    current_confidence = confidence
-                    current_text = [page_texts[page_idx]]
-                else:
-                    # Continue current segment
-                    current_text.append(page_texts[page_idx])
-                    current_confidence = max(current_confidence, confidence)
+                # Start new segment
+                current_type = detected_type
+                current_start = page_idx
+                current_confidence = best_confidence
+                current_text = [page_text]
+            elif detected_type:
+                # Continue current segment
+                current_text.append(page_text)
+                current_confidence = max(current_confidence, best_confidence)
             else:
-                # No clear match - continue previous segment if exists
+                # No detection - add to current segment if exists
                 if current_type:
-                    current_text.append(page_texts[page_idx])
+                    current_text.append(page_text)
         
         # Save final segment
         if current_type and current_text:
             segments.append(DocumentSegment(
                 segment_id=f"seg-{len(segments)+1}",
                 doc_type=current_type,
-                start_page=current_start + 1,
+                start_page=current_start + page_offset + 1,
                 end_page=len(page_texts),
                 title=self._extract_title(current_text[0]),
                 text="\n".join(current_text),
