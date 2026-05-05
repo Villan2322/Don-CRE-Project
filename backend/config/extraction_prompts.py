@@ -475,41 +475,51 @@ Your task:
 
 === SCORING SYSTEM (100 points maximum) ===
 
+IMPORTANT: Score based on DATA CATEGORIES present, not file count!
+A single consolidated PDF with multiple sections counts for multiple categories.
+
 1. DATA COMPLETENESS (Max 20 pts)
-   +4 points for EACH key doc type present: LEASE, RENT_ROLL, BOMA, MANAGEMENT_REPORT, COUNTY_PA
-   Maximum 20 points (5 doc types = full score)
+   +4 points for EACH data category present:
+   
+   Category A - Tenant/Rent Data (+4): RENT_ROLL, RENT_ROLL_XLSX, or any section with tenant names + rents
+   Category B - Lease Terms (+4): LEASE, LEASE_ABSTRACT, LEASE_RECAP, or any section with lease dates
+   Category C - Physical Measurements (+4): BOMA, COUNTY_PA, or any RSF measurements
+   Category D - Operating Financials (+4): MANAGEMENT_REPORT, FINANCIAL_MODEL, DISBURSEMENTS, INCOME_EXPENSE
+   Category E - Receivables/AR (+4): ENDING_RECEIVABLES, AR_AGING, CAM_RECONCILIATION
+   
+   Maximum 20 points (all 5 categories = full score)
 
 2. RSF ALIGNMENT (Max 20 pts)
-   - 20: All RSF sources match within 1%
+   - 20: RSF data available and consistent across sources (within 1%)
    - 15: Minor variance (1-3%)
-   - 10: Moderate variance (3-5%)
+   - 10: Moderate variance (3-5%) 
    - 5: Significant variance (5-10%)
-   - 0: Major variance (>10%) or cannot calculate
+   - 0: Major variance (>10%) or only one RSF source
 
 3. FINANCIAL INTEGRITY (Max 20 pts)
-   - 20: NOI verified, AR current, CAM recovery >95%
-   - 15: Minor AR aging (<5% delinquent)
-   - 10: Moderate AR issues (5-15% delinquent)
-   - 5: Significant AR issues (>15% delinquent)
-   - 0: Cannot verify financials
+   - 20: Financial data verified, AR current (<5% delinquent)
+   - 15: Minor AR aging (5-10% delinquent)
+   - 10: Moderate AR issues (10-20% delinquent)
+   - 5: Significant AR issues (>20% delinquent)
+   - 0: No financial data available
 
 4. LEASE LEVERAGE (Max 20 pts)
-   - 20: WALT >60 months, all expiry dates known, strong renewal options
-   - 15: WALT 36-60 months, minor gaps
-   - 10: WALT 24-36 months or >30% rolling within 12 months
-   - 5: WALT <24 months or missing expiry on major tenants
-   - 0: Cannot calculate WALT
+   - 20: WALT >60 months, all expiry dates known
+   - 15: WALT 36-60 months, most expiry dates known
+   - 10: WALT 24-36 months or >30% expiring within 12 months
+   - 5: WALT <24 months or many missing expiry dates
+   - 0: Cannot calculate WALT (no lease dates)
 
 5. RISK PROFILE (Max 15 pts)
    - 15: Vacancy <5%, no tenant >30% of income
    - 12: Vacancy 5-10%, no tenant >50%
    - 8: Vacancy 10-15% OR single tenant 50-70%
    - 4: Vacancy >15% OR single tenant >70%
-   - 0: Critical concentration or vacancy
+   - 0: Critical concentration or vacancy issues
 
 6. DOCUMENT COVERAGE + RSF BONUS (Max 15 pts)
-   - Base: +3 per doc type (max 12 for 4+ types)
-   - BONUS +5: If BOMA and rent roll BOTH present AND delta >5%
+   - Base: +3 per data category (max 12 for 4+ categories)
+   - BONUS +5: If RSF variance >5% is detected AND calculable (RSF recovery opportunity)
 
 === DEAL TIERS ===
 - 80-100: GREEN - Proceed with confidence

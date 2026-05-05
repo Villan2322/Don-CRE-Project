@@ -155,15 +155,27 @@ class RiskScoringAgent(BaseAgent):
         sub_scores = {}
         factors = []
         
-        # 1. DATA COMPLETENESS (Max 20 pts, +4 per doc type up to 5)
-        key_doc_types = ["LEASE", "RENT_ROLL", "BOMA", "MANAGEMENT_REPORT", "COUNTY_PA"]
-        docs_found = len([d for d in doc_types_present if d in key_doc_types])
-        sub_scores["data_completeness"] = min(docs_found * 4, 20)
+        # 1. DATA COMPLETENESS (Max 20 pts, +4 per DATA CATEGORY present)
+        # Categories group related doc types - a consolidated PDF counts across multiple categories
+        categories = {
+            "tenant_rent": ["RENT_ROLL", "RENT_ROLL_XLSX"],  # Category A
+            "lease_terms": ["LEASE", "LEASE_ABSTRACT", "LEASE_RECAP"],  # Category B
+            "measurements": ["BOMA", "COUNTY_PA"],  # Category C
+            "financials": ["MANAGEMENT_REPORT", "FINANCIAL_MODEL", "DISBURSEMENTS", "INCOME_EXPENSE"],  # Category D
+            "receivables": ["ENDING_RECEIVABLES", "AR_AGING", "CAM_RECONCILIATION"],  # Category E
+        }
+        
+        categories_found = []
+        for cat_name, cat_types in categories.items():
+            if any(dt in doc_types_present for dt in cat_types):
+                categories_found.append(cat_name)
+        
+        sub_scores["data_completeness"] = min(len(categories_found) * 4, 20)
         factors.append({
             "category": "data_completeness",
             "points_earned": sub_scores["data_completeness"],
             "points_possible": 20,
-            "reason": f"{docs_found} of 5 key document types present"
+            "reason": f"{len(categories_found)} of 5 data categories present: {', '.join(categories_found) if categories_found else 'none'}"
         })
         
         # 2. RSF ALIGNMENT (Max 20 pts)
@@ -273,24 +285,25 @@ class RiskScoringAgent(BaseAgent):
         })
         
         # 6. DOCUMENT COVERAGE + RSF BONUS (Max 15 pts)
-        # Base: +3 per doc type (max 12 for 4+ types)
-        doc_count = len(doc_types_present)
-        base_doc_pts = min(doc_count * 3, 12)
+        # Base: +3 per data category (max 12 for 4+ categories)
+        base_doc_pts = min(len(categories_found) * 3, 12)
         
-        # Bonus +5 if BOMA and RENT_ROLL both present AND delta >5%
+        # Bonus +5 if RSF variance >5% is detected (RSF recovery opportunity)
+        # Check if we have both measurements category and tenant/rent category
         rsf_bonus = 0
         rsf_bonus_applied = False
-        if "BOMA" in doc_types_present and "RENT_ROLL" in doc_types_present:
-            if variance_pct > 5:
-                rsf_bonus = 5
-                rsf_bonus_applied = True
+        has_measurements = "measurements" in categories_found
+        has_rent_data = "tenant_rent" in categories_found
+        if has_measurements and has_rent_data and variance_pct > 5:
+            rsf_bonus = 5
+            rsf_bonus_applied = True
         
         sub_scores["document_coverage_bonus"] = min(base_doc_pts + rsf_bonus, 15)
         factors.append({
             "category": "document_coverage_bonus",
             "points_earned": sub_scores["document_coverage_bonus"],
             "points_possible": 15,
-            "reason": f"{doc_count} doc types, RSF bonus {'applied' if rsf_bonus_applied else 'not applicable'}"
+            "reason": f"{len(categories_found)} data categories, RSF recovery bonus {'applied (+5)' if rsf_bonus_applied else 'not applicable'}"
         })
         
         # Calculate overall score (capped at 100)
