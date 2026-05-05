@@ -11,7 +11,7 @@ from dateutil.relativedelta import relativedelta
 from typing import Any, Optional
 
 from .base import BaseAgent
-from ..config.extraction_prompts import EXTRACTION_CONFIGS, CLASSIFICATION_PROMPT
+from config.extraction_prompts import EXTRACTION_CONFIGS, CLASSIFICATION_PROMPT
 
 
 class UniversalExtractor(BaseAgent):
@@ -21,7 +21,7 @@ class UniversalExtractor(BaseAgent):
     """
     
     def __init__(self):
-        super().__init__()
+        super().__init__(name="UniversalExtractor", system_prompt="")
         self.configs = EXTRACTION_CONFIGS
     
     async def classify_document(

@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from .base import BaseAgent
-from ..config.extraction_prompts import SYNTHESIS_PROMPT
+from config.extraction_prompts import SYNTHESIS_PROMPT
 
 
 class SynthesisAgent(BaseAgent):
@@ -20,7 +20,7 @@ class SynthesisAgent(BaseAgent):
     """
     
     def __init__(self):
-        super().__init__()
+        super().__init__(name="SynthesisAgent", system_prompt="")
     
     async def synthesize_deal(
         self,
@@ -159,7 +159,10 @@ class ArithmeticVerificationAgent(BaseAgent):
     Independent arithmetic verification.
     Recalculates key figures and flags mismatches.
     """
-    
+
+    def __init__(self):
+        super().__init__(name="ArithmeticVerificationAgent", system_prompt="")
+
     TOLERANCE = 0.01  # 1% tolerance for floating point comparisons
     
     def verify_arithmetic(self, synthesis: dict, extractions: dict) -> dict:
