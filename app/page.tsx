@@ -12,6 +12,7 @@ export default function DashboardPage() {
   const [dealAnalysis, setDealAnalysis] = useState<DealAnalysis>(mockDealAnalysis)
 
   const handleAnalysisComplete = (analysis: DealAnalysis) => {
+    console.log('[v0] handleAnalysisComplete called with:', analysis.dealName, analysis.score, analysis.tier)
     setDealAnalysis(analysis)
     // Switch to snapshot tab to show results
     setActiveTab('snapshot')
