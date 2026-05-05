@@ -4,22 +4,33 @@ from datetime import datetime, timezone
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-# Enable LangSmith tracing - support both LANGSMITH_* and LANGCHAIN_* env vars
-# Map LANGSMITH env vars to LANGCHAIN (which LangGraph uses)
-if os.environ.get("LANGSMITH_API_KEY"):
-    os.environ.setdefault("LANGCHAIN_API_KEY", os.environ["LANGSMITH_API_KEY"])
-if os.environ.get("LANGSMITH_TRACING"):
-    os.environ.setdefault("LANGCHAIN_TRACING_V2", os.environ["LANGSMITH_TRACING"])
-if os.environ.get("LANGSMITH_PROJECT"):
-    # Strip quotes if present
-    project = os.environ["LANGSMITH_PROJECT"].strip('"\'')
-    os.environ.setdefault("LANGCHAIN_PROJECT", project)
-if os.environ.get("LANGSMITH_ENDPOINT"):
-    os.environ.setdefault("LANGCHAIN_ENDPOINT", os.environ["LANGSMITH_ENDPOINT"])
 
-# Defaults
-os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-os.environ.setdefault("LANGCHAIN_PROJECT", "cre-document-intelligence")
+def configure_langsmith_tracing():
+    """
+    Configure LangSmith tracing at runtime.
+    Must be called BEFORE graph invocation in serverless environments
+    where env vars are loaded after module import.
+    """
+    # Map LANGSMITH_* to LANGCHAIN_* (LangGraph uses LANGCHAIN_* internally)
+    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
+    if api_key:
+        os.environ["LANGCHAIN_API_KEY"] = api_key
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        
+        # Project name (strip quotes if present)
+        project = os.environ.get("LANGSMITH_PROJECT") or os.environ.get("LANGCHAIN_PROJECT") or "cre-document-intelligence"
+        os.environ["LANGCHAIN_PROJECT"] = project.strip('"\'')
+        
+        # Endpoint (optional)
+        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or os.environ.get("LANGCHAIN_ENDPOINT")
+        if endpoint:
+            os.environ["LANGCHAIN_ENDPOINT"] = endpoint
+        
+        print(f"[LANGSMITH] Tracing enabled - Project: {os.environ['LANGCHAIN_PROJECT']}")
+        return True
+    else:
+        print("[LANGSMITH] No API key found - tracing disabled")
+        return False
 
 # Support both package imports (when run as module) and direct imports (for tests)
 try:
