@@ -21,7 +21,7 @@ class UniversalExtractor(BaseAgent):
     """
     
     def __init__(self):
-        super().__init__()
+        super().__init__(name="UniversalExtractor", system_prompt="")
         self.configs = EXTRACTION_CONFIGS
     
     async def classify_document(

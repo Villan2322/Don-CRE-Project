@@ -1,6 +1,6 @@
 import fastapi
 import fastapi.middleware.cors
-from fastapi import UploadFile, File, HTTPException
+from fastapi import UploadFile, File, Form, HTTPException
 from typing import Optional
 import uuid
 
@@ -13,6 +13,7 @@ from models.schemas import (
     AnalysisResult,
 )
 from services.document_processor import processor
+from .graph import graph
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",
@@ -81,46 +82,61 @@ async def get_document(document_id: str) -> ProcessedDocument:
     return processor.documents[document_id]
 
 
-@app.post("/analyze", response_model=AnalysisResponse)
-async def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
+@app.post("/analyze")
+async def analyze_deal(
+    deal_name: str = Form(...),
+    files: list[UploadFile] = File(...),
+) -> dict:
     """
-    Run full AI analysis pipeline on uploaded documents.
+    Run full AI analysis pipeline on uploaded documents using LangGraph.
     
     This orchestrates all AI agents:
-    1. Document Classification
-    2. Lease Abstraction
-    3. Rent Roll Analysis
-    4. RSF Reconciliation
-    5. Red Flag Detection
-    6. Risk Scoring
+    1. Document Ingestion & OCR
+    2. Document Classification
+    3. Universal Extraction
+    4. Synthesis
+    5. Arithmetic Verification
+    6. RSF Reconciliation
+    7. Red Flag Detection
+    8. Risk Scoring
     """
-    # Validate documents exist
-    missing = [d for d in request.documents if d not in processor.documents]
-    if missing:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Documents not found: {missing}"
-        )
-    
-    try:
-        result = await processor.run_full_analysis(
-            deal_id=request.deal_id,
-            document_ids=request.documents
-        )
-        
-        return AnalysisResponse(
-            deal_id=request.deal_id,
-            status=ProcessingStatus.COMPLETED,
-            message="Analysis completed successfully",
-            result=result
-        )
-    except Exception as e:
-        return AnalysisResponse(
-            deal_id=request.deal_id,
-            status=ProcessingStatus.FAILED,
-            message=f"Analysis failed: {str(e)}",
-            result=None
-        )
+    deal_id = str(uuid.uuid4())
+    raw_files = {}
+    content_types = {}
+    for f in files:
+        if not f.filename:
+            continue
+        raw_files[f.filename] = await f.read()
+        content_types[f.filename] = f.content_type or "application/octet-stream"
+
+    if not raw_files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    initial_state = {
+        "deal_id": deal_id, "deal_name": deal_name,
+        "raw_files": raw_files, "file_content_types": content_types,
+        "raw_documents": [], "ingest_errors": [],
+        "classified_documents": [], "classification_errors": [],
+        "extractions": [], "extraction_errors": [],
+        "synthesis": {}, "rsf_recovery": {}, "score_summary": {},
+        "synthesis_error": None, "arithmetic_verification": {},
+        "rent_roll_analysis": {}, "rsf_reconciliation": {},
+        "red_flags_result": {}, "deal_score_result": {},
+        "completeness_result": {}, "pipeline_stage": "pending",
+        "pipeline_errors": [], "completed_at": None,
+    }
+
+    result = graph.invoke(initial_state)
+    processor.deals[deal_id] = {"result": result, "raw_data": result}
+
+    return {
+        "deal_id": deal_id,
+        "pipeline_stage": result.get("pipeline_stage"),
+        "overall_score": result.get("score_summary", {}).get("overall"),
+        "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
+        "documents_processed": len(result.get("extractions", [])),
+        "errors": result.get("pipeline_errors", []),
+    }
 
 
 @app.get("/deals/{deal_id}", response_model=AnalysisResult)
