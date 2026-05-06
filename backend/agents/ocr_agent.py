@@ -1,26 +1,44 @@
 """
 OCR Agent
 Handles optical character recognition for scanned documents and images.
+Uses Claude Vision as primary OCR (works in serverless), falls back to Tesseract if available.
 """
 
+import base64
 import io
+import os
 from typing import Optional
+
+try:
+    import anthropic
+    HAS_CLAUDE = True
+except ImportError:
+    HAS_CLAUDE = False
 
 try:
     import pytesseract
     from PIL import Image
     from pdf2image import convert_from_bytes
-    HAS_OCR = True
+    HAS_TESSERACT = True
 except ImportError:
-    HAS_OCR = False
+    HAS_TESSERACT = False
+
+try:
+    import PyPDF2
+    HAS_PYPDF2 = True
+except ImportError:
+    HAS_PYPDF2 = False
 
 
 class OCRAgent:
-    """Agent for OCR processing of scanned documents."""
+    """Agent for OCR processing of scanned documents using Claude Vision."""
     
     def __init__(self):
         self.name = "OCRAgent"
-        self.min_confidence = 70.0  # Minimum OCR confidence threshold
+        self.min_confidence = 70.0
+        self.client = None
+        if HAS_CLAUDE and os.environ.get("ANTHROPIC_API_KEY"):
+            self.client = anthropic.Anthropic()
     
     async def process(
         self,
@@ -29,52 +47,130 @@ class OCRAgent:
         page_count: Optional[int] = None
     ) -> dict:
         """
-        Process a document with OCR.
-        
-        Args:
-            file_content: Raw file bytes
-            filename: Original filename
-            page_count: Expected page count (for PDFs)
-            
-        Returns:
-            dict with extracted text, confidence, and any issues found
+        Process a document with OCR using Claude Vision (primary) or Tesseract (fallback).
         """
-        if not HAS_OCR:
-            return {
-                "document_readable": False,
-                "cleaned_text": "",
-                "confidence": 0.0,
-                "ocr_issues_found": ["OCR libraries not installed (pytesseract, PIL, pdf2image)"],
-                "pages_processed": 0
-            }
-        
         filename_lower = filename.lower()
         
-        try:
-            # Handle PDFs
-            if filename_lower.endswith('.pdf'):
-                return await self._ocr_pdf(file_content, page_count)
-            
-            # Handle images
-            if filename_lower.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
-                return await self._ocr_image(file_content)
-            
-            return {
-                "document_readable": False,
-                "cleaned_text": "",
-                "confidence": 0.0,
-                "ocr_issues_found": [f"Unsupported file type for OCR: {filename}"],
-                "pages_processed": 0
-            }
-            
-        except Exception as e:
-            return {
-                "document_readable": False,
-                "cleaned_text": "",
-                "confidence": 0.0,
-                "ocr_issues_found": [f"OCR processing error: {str(e)}"],
-                "pages_processed": 0
-            }
+        # Try Claude Vision first (works in serverless)
+        if self.client:
+            try:
+                if filename_lower.endswith('.pdf'):
+                    return await self._ocr_pdf_with_claude(file_content, page_count)
+                elif filename_lower.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+                    return await self._ocr_image_with_claude(file_content, filename)
+            except Exception as e:
+                print(f"[OCR] Claude Vision failed: {e}, trying fallback...")
+        
+        # Fallback to Tesseract if available
+        if HAS_TESSERACT:
+            try:
+                if filename_lower.endswith('.pdf'):
+                    return await self._ocr_pdf(file_content, page_count)
+                elif filename_lower.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+                    return await self._ocr_image(file_content)
+            except Exception as e:
+                print(f"[OCR] Tesseract failed: {e}")
+        
+        return {
+            "document_readable": False,
+            "cleaned_text": "",
+            "confidence": 0.0,
+            "ocr_issues_found": ["No OCR method available (Claude API or Tesseract)"],
+            "pages_processed": 0
+        }
+    
+    async def _ocr_pdf_with_claude(self, file_content: bytes, page_count: Optional[int] = None) -> dict:
+        """OCR a PDF using Claude's native PDF support."""
+        # Claude can process PDFs directly via base64
+        pdf_base64 = base64.standard_b64encode(file_content).decode("utf-8")
+        
+        message = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=16000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": """Extract ALL text from this document exactly as it appears. 
+This is a commercial real estate document that may contain:
+- Rent rolls with tenant names, suite numbers, square footage, rent amounts
+- Lease terms, dates, escalation clauses
+- Financial data, receivables, disbursements
+- Property information
+
+Preserve the structure including tables, columns, and formatting.
+Do NOT summarize - extract the complete text verbatim.
+If there are tables, format them with tabs or pipes to preserve column alignment."""
+                    }
+                ],
+            }],
+        )
+        
+        extracted_text = message.content[0].text
+        
+        return {
+            "document_readable": len(extracted_text) > 100,
+            "cleaned_text": extracted_text,
+            "confidence": 95.0,  # Claude Vision is highly accurate
+            "ocr_issues_found": [],
+            "pages_processed": page_count or 1
+        }
+    
+    async def _ocr_image_with_claude(self, file_content: bytes, filename: str) -> dict:
+        """OCR an image using Claude Vision."""
+        # Determine media type
+        ext = filename.lower().split('.')[-1]
+        media_type_map = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'webp': 'image/webp'
+        }
+        media_type = media_type_map.get(ext, 'image/png')
+        
+        image_base64 = base64.standard_b64encode(file_content).decode("utf-8")
+        
+        message = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=8000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract ALL text from this image exactly as it appears. Preserve structure and formatting."
+                    }
+                ],
+            }],
+        )
+        
+        extracted_text = message.content[0].text
+        
+        return {
+            "document_readable": len(extracted_text) > 20,
+            "cleaned_text": extracted_text,
+            "confidence": 95.0,
+            "ocr_issues_found": [],
+            "pages_processed": 1
+        }
     
     async def _ocr_pdf(self, file_content: bytes, page_count: Optional[int] = None) -> dict:
         """OCR a PDF document by converting pages to images."""

@@ -1,3 +1,4 @@
+import os
 import fastapi
 import fastapi.middleware.cors
 from fastapi import UploadFile, File, Form, HTTPException
@@ -13,7 +14,10 @@ from models.schemas import (
     AnalysisResult,
 )
 from services.document_processor import processor
-from .graph import graph
+try:
+    from .graph import graph, configure_langsmith_tracing
+except ImportError:
+    from graph import graph, configure_langsmith_tracing
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",
@@ -100,6 +104,9 @@ async def analyze_deal(
     7. Red Flag Detection
     8. Risk Scoring
     """
+    # Configure LangSmith tracing at runtime (Vercel loads env vars after module import)
+    configure_langsmith_tracing()
+    
     deal_id = str(uuid.uuid4())
     raw_files = {}
     content_types = {}
@@ -126,17 +133,29 @@ async def analyze_deal(
         "pipeline_errors": [], "completed_at": None,
     }
 
-    result = graph.invoke(initial_state)
-    processor.deals[deal_id] = {"result": result, "raw_data": result}
+    try:
+        print(f"[PIPELINE] Starting analysis for deal: {deal_name} ({deal_id})")
+        print(f"[PIPELINE] Files: {list(raw_files.keys())}")
+        
+        # Use async invoke for the graph
+        result = await graph.ainvoke(initial_state)
+        
+        print(f"[PIPELINE] Completed. Stage: {result.get('pipeline_stage')}")
+        processor.deals[deal_id] = {"result": result, "raw_data": result}
 
-    return {
-        "deal_id": deal_id,
-        "pipeline_stage": result.get("pipeline_stage"),
-        "overall_score": result.get("score_summary", {}).get("overall"),
-        "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
-        "documents_processed": len(result.get("extractions", [])),
-        "errors": result.get("pipeline_errors", []),
-    }
+        return {
+            "deal_id": deal_id,
+            "pipeline_stage": result.get("pipeline_stage"),
+            "overall_score": result.get("score_summary", {}).get("overall"),
+            "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
+            "documents_processed": len(result.get("extractions", [])),
+            "errors": result.get("pipeline_errors", []),
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+        print(f"[PIPELINE ERROR] {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @app.get("/deals/{deal_id}", response_model=AnalysisResult)

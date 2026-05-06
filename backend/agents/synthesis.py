@@ -9,8 +9,12 @@ import re
 from datetime import datetime
 from typing import Any
 
-from .base import BaseAgent
-from ..config.extraction_prompts import SYNTHESIS_PROMPT
+try:
+    from .base import BaseAgent
+    from ..config.extraction_prompts import SYNTHESIS_PROMPT
+except ImportError:
+    from agents.base import BaseAgent
+    from config.extraction_prompts import SYNTHESIS_PROMPT
 
 
 class SynthesisAgent(BaseAgent):
@@ -39,6 +43,11 @@ class SynthesisAgent(BaseAgent):
         # Build the prompt with present doc types
         doc_types_present = list(grouped.keys())
         lease_count = len(grouped.get("LEASE", []))
+        
+        # Debug: Log what doc types we found
+        print(f"[SYNTHESIS] Deal: {deal_name}")
+        print(f"[SYNTHESIS] Doc types present: {doc_types_present}")
+        print(f"[SYNTHESIS] Extraction count by type: {[(k, len(v)) for k, v in grouped.items()]}")
         
         prompt = SYNTHESIS_PROMPT.format(
             doc_types_present=", ".join(doc_types_present)

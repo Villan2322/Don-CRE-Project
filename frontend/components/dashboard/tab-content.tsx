@@ -14,11 +14,22 @@ import { DocumentUpload } from './document-upload'
 
 interface TabContentProps {
   activeTab: TabId
-  deal: DealAnalysis
+  deal: DealAnalysis | null
   onAnalysisComplete?: (analysis: DealAnalysis) => void
 }
 
 export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentProps) {
+  // Upload tab is always available
+  if (activeTab === 'upload') {
+    return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
+  }
+
+  // For all other tabs, show empty state if no deal data
+  if (!deal) {
+    return <EmptyState />
+  }
+
+  // Render the appropriate tab with deal data
   switch (activeTab) {
     case 'snapshot':
       return <SnapshotTab deal={deal} />
@@ -32,11 +43,42 @@ export function TabContent({ activeTab, deal, onAnalysisComplete }: TabContentPr
       return <RiskTab deal={deal} />
     case 'abstracts':
       return <AbstractsTab deal={deal} />
-    case 'upload':
-      return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
     default:
       return <SnapshotTab deal={deal} />
   }
+}
+
+function EmptyState() {
+  return (
+    <div className="flex h-full min-h-[400px] items-center justify-center">
+      <div className="mx-auto max-w-md text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+          <svg
+            className="h-8 w-8 text-muted-foreground"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+        </div>
+        <h3 className="text-lg font-semibold">No Deal Analyzed Yet</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Upload documents to start analyzing a deal. Supported formats include rent rolls, 
+          leases, BOMA measurements, and financial statements.
+        </p>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Go to the <span className="font-medium">Upload Documents</span> tab to get started.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 function SnapshotTab({ deal }: { deal: DealAnalysis }) {
@@ -46,9 +88,9 @@ function SnapshotTab({ deal }: { deal: DealAnalysis }) {
       {deal.rsfReconciliation.alertTriggered && <RSFAlert rsf={deal.rsfReconciliation} />}
       <MetricsGrid deal={deal} />
       <div className="grid gap-6 lg:grid-cols-3">
-        <ScoreHistoryChart />
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <ScoreHistoryChart deal={deal} />
+        <IncomeConcentrationChart deal={deal} />
+        <WALTTimelineChart deal={deal} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <RedFlagsList flags={deal.redFlags} limit={3} />
@@ -239,8 +281,8 @@ function RiskTab({ deal }: { deal: DealAnalysis }) {
         <WhatToGetNext items={deal.whatToGetNext} />
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <IncomeConcentrationChart />
-        <WALTTimelineChart />
+        <IncomeConcentrationChart deal={deal} />
+        <WALTTimelineChart deal={deal} />
       </div>
     </div>
   )

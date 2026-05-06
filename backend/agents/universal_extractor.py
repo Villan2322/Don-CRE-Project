@@ -10,8 +10,12 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from typing import Any, Optional
 
-from .base import BaseAgent
-from ..config.extraction_prompts import EXTRACTION_CONFIGS, CLASSIFICATION_PROMPT
+try:
+    from .base import BaseAgent
+    from ..config.extraction_prompts import EXTRACTION_CONFIGS, CLASSIFICATION_PROMPT
+except ImportError:
+    from agents.base import BaseAgent
+    from config.extraction_prompts import EXTRACTION_CONFIGS, CLASSIFICATION_PROMPT
 
 
 class UniversalExtractor(BaseAgent):

@@ -131,35 +131,67 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   }
 
   const runAnalysis = async () => {
+    console.log('[v0] runAnalysis called, files count:', files.length)
+    console.log('[v0] files:', files.map(f => ({ id: f.id, name: f.file?.name, hasFile: !!f.file, status: f.status })))
+    
     setIsAnalyzing(true)
     
     try {
+      // Build FormData with actual files
+      const formData = new FormData()
+      
+      // Extract deal name from first file
+      const firstFile = files[0]?.file
+      const dealName = firstFile?.name
+        .replace(/\.(pdf|xlsx|xls|csv)$/i, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\b(rent roll|lease|boma|feb|jan|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4}|\(\d+\))/gi, '')
+        .trim() || 'Unknown Property'
+      
+      formData.append('dealName', dealName)
+      
+      // Append ALL files (pending, completed, any status) - the backend handles everything
+      let fileCount = 0
+      for (const uploadedFile of files) {
+        if (uploadedFile.file) {
+          formData.append('files', uploadedFile.file)
+          fileCount++
+        }
+      }
+      
+      console.log('[v0] Sending', fileCount, 'files for analysis, deal:', dealName)
+      
+      // Mark all as processing
+      setFiles(prev => prev.map(f => ({ ...f, status: 'processing' as const })))
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documents: uploadedDocuments }),
+        body: formData,
       })
       
       if (!response.ok) {
-        throw new Error('Analysis failed')
+        const errorText = await response.text()
+        console.error('[v0] Analysis failed:', response.status, errorText)
+        throw new Error(`Analysis failed: ${errorText}`)
       }
       
       const result = await response.json()
-      console.log('[v0] Analysis API response:', result)
-      console.log('[v0] Analysis data:', result.analysis)
+      console.log('[v0] Analysis result:', result.success ? 'success' : 'failed', result.source)
+      
+      // Mark all as completed
+      setFiles(prev => prev.map(f => ({ ...f, status: 'completed' as const, progress: 100 })))
       
       setIsAnalyzing(false)
       setAnalysisComplete(true)
       
-      // Pass the analysis results back to the parent
       if (result.analysis) {
-        console.log('[v0] Calling onAnalysisComplete with:', result.analysis.dealName, result.analysis.score)
         onAnalysisComplete?.(result.analysis)
-      } else {
-        console.error('[v0] No analysis in response')
+      } else if (result.error) {
+        console.error('[v0] Analysis error:', result.error)
       }
     } catch (error) {
-      console.error('Analysis error:', error)
+      console.error('[v0] Analysis exception:', error)
+      setFiles(prev => prev.map(f => ({ ...f, status: 'error' as const, error: 'Analysis failed' })))
       setIsAnalyzing(false)
     }
   }
@@ -365,13 +397,13 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       )}
 
       {/* Analysis Button */}
-      {completedCount > 0 && (
+      {files.length > 0 && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="flex items-center justify-between p-6">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
               <p className="text-sm text-muted-foreground">
-                {completedCount} documents ready for AI-powered analysis
+                {files.length} document{files.length !== 1 ? 's' : ''} ready for AI-powered analysis
               </p>
             </div>
             <Button

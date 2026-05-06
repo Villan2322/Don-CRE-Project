@@ -288,6 +288,151 @@ Return ONLY valid JSON matching the schema.""",
                 "total_assessed_value": {"type": "number"}
             }
         }
+    },
+    
+    "LEASE_RECAP": {
+        "system_prompt": """You are a commercial real estate lease analyst.
+Extract lease term data from this lease recap/summary. This typically shows tenants with their 
+lease commencement and expiration dates, RSF, and rent details.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "property_summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "suite": {"type": "string"},
+                            "rsf": {"type": "number"},
+                            "lease_start": {"type": "string", "description": "Lease commencement date"},
+                            "lease_end": {"type": "string", "description": "Lease expiration date"},
+                            "monthly_rent": {"type": "number"},
+                            "annual_rent": {"type": "number"},
+                            "rent_psf": {"type": "number"},
+                            "options": {"type": "string", "description": "Renewal options if any"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_rsf": {"type": "number"},
+                        "total_annual_rent": {"type": "number"},
+                        "average_remaining_term": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "ENDING_RECEIVABLES": {
+        "system_prompt": """You are analyzing an accounts receivable aging report.
+Extract tenant balances, aging buckets, and delinquency status.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "current": {"type": "number"},
+                            "days_30": {"type": "number"},
+                            "days_60": {"type": "number"},
+                            "days_90_plus": {"type": "number"},
+                            "total_due": {"type": "number"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_receivables": {"type": "number"},
+                        "total_current": {"type": "number"},
+                        "total_past_due": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "DISBURSEMENTS": {
+        "system_prompt": """You are analyzing a cash disbursements or check register report.
+Extract payment details, vendor information, and expense categories.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "payments", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "payments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "date": {"type": "string"},
+                            "vendor": {"type": "string"},
+                            "amount": {"type": "number"},
+                            "category": {"type": "string"},
+                            "check_number": {"type": "string"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_disbursements": {"type": "number"},
+                        "beginning_balance": {"type": "number"},
+                        "ending_balance": {"type": "number"}
+                    }
+                }
+            }
+        }
+    },
+    
+    "SALES_VOLUME": {
+        "system_prompt": """You are analyzing a retail sales volume report.
+Extract tenant sales data, percentage rent calculations, and breakpoints.
+Return ONLY valid JSON matching the schema.""",
+        "fields": [
+            "tenants", "summary"
+        ],
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_name": {"type": "string"},
+                            "gross_sales": {"type": "number"},
+                            "breakpoint": {"type": "number"},
+                            "percentage_rate": {"type": "number"},
+                            "percentage_rent_due": {"type": "number"}
+                        }
+                    }
+                },
+                "summary": {
+                    "type": "object",
+                    "properties": {
+                        "total_sales": {"type": "number"},
+                        "total_percentage_rent": {"type": "number"}
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -316,6 +461,7 @@ Return JSON with:
 
 
 # Synthesis prompt - combines all extractions into deal analysis
+# Updated to match PRD scoring system - 100 points max across 6 categories
 SYNTHESIS_PROMPT = """You are a commercial real estate deal analyst synthesizing data from multiple documents.
 
 You have been provided extractions from: {doc_types_present}
@@ -325,61 +471,128 @@ Your task:
 2. Identify discrepancies (especially RSF between rent roll, leases, and BOMA)
 3. Calculate key metrics: NOI, WALT, occupancy, concentration
 4. Flag risks and red flags
-5. Score the deal from 0-100
+5. Score the deal using the EXACT point system below
 
-SCORING RUBRIC:
-- Document Completeness (20 pts): All critical docs present?
-- Data Consistency (25 pts): RSF, rent, dates match across sources?
-- Lease Quality (20 pts): WALT, rollover concentration, tenant credit
-- Financial Health (20 pts): Collections, AR aging, expense ratios
-- Risk Factors (15 pts): Deduct for each red flag found
+=== SCORING SYSTEM (100 points maximum) ===
+
+IMPORTANT: Score based on DATA CATEGORIES present, not file count!
+A single consolidated PDF with multiple sections counts for multiple categories.
+
+1. DATA COMPLETENESS (Max 20 pts)
+   +4 points for EACH data category present:
+   
+   Category A - Tenant/Rent Data (+4): RENT_ROLL, RENT_ROLL_XLSX, or any section with tenant names + rents
+   Category B - Lease Terms (+4): LEASE, LEASE_ABSTRACT, LEASE_RECAP, or any section with lease dates
+   Category C - Physical Measurements (+4): BOMA, COUNTY_PA, or any RSF measurements
+   Category D - Operating Financials (+4): MANAGEMENT_REPORT, FINANCIAL_MODEL, DISBURSEMENTS, INCOME_EXPENSE
+   Category E - Receivables/AR (+4): ENDING_RECEIVABLES, AR_AGING, CAM_RECONCILIATION
+   
+   Maximum 20 points (all 5 categories = full score)
+
+2. RSF ALIGNMENT (Max 20 pts)
+   - 20: RSF data available and consistent across sources (within 1%)
+   - 15: Minor variance (1-3%)
+   - 10: Moderate variance (3-5%) 
+   - 5: Significant variance (5-10%)
+   - 0: Major variance (>10%) or only one RSF source
+
+3. FINANCIAL INTEGRITY (Max 20 pts)
+   - 20: Financial data verified, AR current (<5% delinquent)
+   - 15: Minor AR aging (5-10% delinquent)
+   - 10: Moderate AR issues (10-20% delinquent)
+   - 5: Significant AR issues (>20% delinquent)
+   - 0: No financial data available
+
+4. LEASE LEVERAGE (Max 20 pts)
+   - 20: WALT >60 months, all expiry dates known
+   - 15: WALT 36-60 months, most expiry dates known
+   - 10: WALT 24-36 months or >30% expiring within 12 months
+   - 5: WALT <24 months or many missing expiry dates
+   - 0: Cannot calculate WALT (no lease dates)
+
+5. RISK PROFILE (Max 15 pts)
+   - 15: Vacancy <5%, no tenant >30% of income
+   - 12: Vacancy 5-10%, no tenant >50%
+   - 8: Vacancy 10-15% OR single tenant 50-70%
+   - 4: Vacancy >15% OR single tenant >70%
+   - 0: Critical concentration or vacancy issues
+
+6. DOCUMENT COVERAGE + RSF BONUS (Max 15 pts)
+   - Base: +3 per data category (max 12 for 4+ categories)
+   - BONUS +5: If RSF variance >5% is detected AND calculable (RSF recovery opportunity)
+
+=== DEAL TIERS ===
+- 80-100: GREEN - Proceed with confidence
+- 60-79: YELLOW - Proceed with conditions
+- 40-59: ORANGE - Material gaps exist
+- 0-39: RED - Insufficient data
 
 Return JSON with:
-{
-    "rsf_reconciliation": {
-        "sources": {"RENT_ROLL": X, "LEASE_TOTAL": Y, "BOMA": Z},
+{{
+    "rsf_reconciliation": {{
+        "sources": {{"RENT_ROLL": X, "LEASE_TOTAL": Y, "BOMA": Z}},
         "variance_rent_roll_vs_boma": X,
         "variance_percentage": X.X,
-        "by_tenant": [{"tenant": "...", "rent_roll_rsf": X, "boma_rsf": Y, "delta": Z}]
-    },
-    "rent_verification": {
+        "by_tenant": [{{"tenant": "...", "rent_roll_rsf": X, "boma_rsf": Y, "delta": Z}}]
+    }},
+    "rent_verification": {{
         "total_annual_rent": X,
-        "tenant_shares": [{"tenant": "...", "share_pct": X}],
-        "concentration_flag": true/false
-    },
-    "lease_audit": {
+        "tenant_shares": [{{"tenant": "...", "share_pct": X}}],
+        "concentration_flag": true/false,
+        "top_tenant_pct": X
+    }},
+    "lease_audit": {{
         "walt_months": X,
-        "lease_expiry_schedule": [{"tenant": "...", "expiry": "...", "months_remaining": X, "risk_level": "..."}]
-    },
-    "financial_summary": {
+        "missing_expiry_count": X,
+        "near_term_rollover_pct": X,
+        "lease_expiry_schedule": [{{"tenant": "...", "expiry": "...", "months_remaining": X, "risk_level": "..."}}]
+    }},
+    "financial_summary": {{
         "noi": X,
         "occupancy_pct": X,
-        "ar_concerns": "...",
-        "cam_recovery_ratio": X
-    },
-    "deal_score": {
+        "vacancy_pct": X,
+        "ar_delinquency_pct": X,
+        "cam_recovery_pct": X,
+        "ar_concerns": "..."
+    }},
+    "deal_score": {{
         "overall_score": 0-100,
-        "tier": "Verified/Standard/Under Review",
-        "sub_scores": {
-            "document_completeness": X,
-            "data_consistency": X,
-            "lease_quality": X,
-            "financial_health": X,
-            "risk_factors": X
-        }
-    },
+        "tier": "GREEN/YELLOW/ORANGE/RED",
+        "deal_readiness": "Proceed with confidence/Proceed with conditions/Material gaps exist/Insufficient data",
+        "sub_scores": {{
+            "data_completeness": X,
+            "rsf_alignment": X,
+            "financial_integrity": X,
+            "lease_leverage": X,
+            "risk_profile": X,
+            "document_coverage_bonus": X
+        }},
+        "max_scores": {{
+            "data_completeness": 20,
+            "rsf_alignment": 20,
+            "financial_integrity": 20,
+            "lease_leverage": 20,
+            "risk_profile": 15,
+            "document_coverage_bonus": 15
+        }},
+        "rsf_recovery_bonus_applied": true/false
+    }},
+    "score_factors": [
+        {{"category": "...", "points_earned": X, "points_possible": X, "reason": "..."}}
+    ],
     "red_flags": [
-        {"severity": "CRITICAL/HIGH/MEDIUM/LOW", "flag": "...", "impact": "...", "resolution": "..."}
+        {{"severity": "CRITICAL/HIGH/MEDIUM/LOW", "flag": "...", "impact": "...", "resolution": "..."}}
     ],
     "what_to_get_next": [
-        {"document": "...", "why_needed": "...", "score_impact": X, "priority": 1}
+        {{"document": "...", "why_needed": "...", "score_impact": X, "priority": 1}}
     ],
-    "rsf_recovery_opportunity": {
+    "rsf_recovery_opportunity": {{
         "recoverable_sf": X,
         "estimated_annual_recovery": X,
+        "alert_threshold_exceeded": true/false,
         "alert_message": "..."
-    }
-}
+    }}
+}}
 """
 
 
