@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-// DEPLOYED PYTHON BACKEND URL - hardcoded to always work
-const DEPLOYED_BACKEND = 'https://v0-cre-project-mpwm6znab-anthony-vs-projects-23a0e41a.vercel.app'
+// PRODUCTION PYTHON BACKEND URL - no auth required, publicly accessible
+const DEPLOYED_BACKEND = 'https://v0-cre-project.vercel.app'
 
 function getBackendUrl(request?: NextRequest): string {
   // Always use the deployed backend URL
