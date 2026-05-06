@@ -76,14 +76,20 @@ async def ingest_documents(state: CREPipelineState) -> dict:
     raw_documents = []
     errors = []
     
+    print(f"[INGEST] Starting ingestion of {len(state['raw_files'])} files")
+    
     for filename, file_bytes in state["raw_files"].items():
         content_type = state["file_content_types"].get(filename, "application/octet-stream")
         base_doc_id = f"doc-{filename.replace(' ', '_')}-{id(file_bytes)}"
+        
+        print(f"[INGEST] Processing: {filename} ({len(file_bytes)} bytes, {content_type})")
         
         try:
             parse_result = _parsing_agent.check(
                 filename=filename, file_content=file_bytes, content_type=content_type
             )
+            
+            print(f"[INGEST] Parse result: parseable={parse_result.is_parseable}, type={parse_result.file_type}, needs_ocr={parse_result.needs_ocr}, text_len={len(parse_result.extracted_text)}")
             
             if not parse_result.is_parseable:
                 errors.append(f"{filename}: {parse_result.reason}")
@@ -95,6 +101,7 @@ async def ingest_documents(state: CREPipelineState) -> dict:
             ocr_confidence = None
             
             if parse_result.needs_ocr:
+                print(f"[INGEST] Running OCR for {filename}...")
                 ocr_result = await _ocr_agent.process(
                     file_content=file_bytes, filename=filename, 
                     page_count=parse_result.page_count
@@ -102,14 +109,19 @@ async def ingest_documents(state: CREPipelineState) -> dict:
                 ocr_performed = True
                 ocr_confidence = ocr_result.get("confidence")
                 
+                print(f"[INGEST] OCR result: readable={ocr_result.get('document_readable')}, confidence={ocr_confidence}, text_len={len(ocr_result.get('cleaned_text', ''))}")
+                
                 if not ocr_result.get("document_readable", False):
                     errors.append(
                         f"{filename}: OCR failed — {', '.join(ocr_result.get('ocr_issues_found', []))}"
                     )
+                    print(f"[INGEST] OCR failed: {ocr_result.get('ocr_issues_found')}")
                     continue
                 extracted_text = ocr_result.get("cleaned_text", "")
             else:
                 extracted_text = parse_result.extracted_text
+            
+            print(f"[INGEST] Extracted {len(extracted_text)} chars from {filename}")
             
             # Check if this is a multi-section document that should be segmented
             # Segment if: PDF with 3+ pages OR text with 5000+ chars with section markers
