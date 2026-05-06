@@ -147,10 +147,19 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       
       formData.append('dealName', dealName)
       
-      // Append all completed files
-      for (const uploadedFile of files.filter(f => f.status === 'completed' && f.file)) {
-        formData.append('files', uploadedFile.file)
+      // Append ALL files (pending, completed, any status) - the backend handles everything
+      let fileCount = 0
+      for (const uploadedFile of files) {
+        if (uploadedFile.file) {
+          formData.append('files', uploadedFile.file)
+          fileCount++
+        }
       }
+      
+      console.log('[v0] Sending', fileCount, 'files for analysis, deal:', dealName)
+      
+      // Mark all as processing
+      setFiles(prev => prev.map(f => ({ ...f, status: 'processing' as const })))
       
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -158,18 +167,28 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       })
       
       if (!response.ok) {
-        throw new Error('Analysis failed')
+        const errorText = await response.text()
+        console.error('[v0] Analysis failed:', response.status, errorText)
+        throw new Error(`Analysis failed: ${errorText}`)
       }
       
       const result = await response.json()
+      console.log('[v0] Analysis result:', result.success ? 'success' : 'failed', result.source)
+      
+      // Mark all as completed
+      setFiles(prev => prev.map(f => ({ ...f, status: 'completed' as const, progress: 100 })))
       
       setIsAnalyzing(false)
       setAnalysisComplete(true)
       
       if (result.analysis) {
         onAnalysisComplete?.(result.analysis)
+      } else if (result.error) {
+        console.error('[v0] Analysis error:', result.error)
       }
-    } catch {
+    } catch (error) {
+      console.error('[v0] Analysis exception:', error)
+      setFiles(prev => prev.map(f => ({ ...f, status: 'error' as const, error: 'Analysis failed' })))
       setIsAnalyzing(false)
     }
   }
@@ -375,13 +394,13 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       )}
 
       {/* Analysis Button */}
-      {completedCount > 0 && (
+      {files.length > 0 && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="flex items-center justify-between p-6">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Ready for Analysis</h3>
               <p className="text-sm text-muted-foreground">
-                {completedCount} documents ready for AI-powered analysis
+                {files.length} document{files.length !== 1 ? 's' : ''} ready for AI-powered analysis
               </p>
             </div>
             <Button
