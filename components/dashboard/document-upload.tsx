@@ -131,6 +131,9 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   }
 
   const runAnalysis = async () => {
+    console.log('[v0] runAnalysis called, files count:', files.length)
+    console.log('[v0] files:', files.map(f => ({ id: f.id, name: f.file?.name, hasFile: !!f.file, status: f.status })))
+    
     setIsAnalyzing(true)
     
     try {
