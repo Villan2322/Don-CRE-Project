@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-// PRODUCTION PYTHON BACKEND URL - no auth required, publicly accessible
-const DEPLOYED_BACKEND = 'https://v0-cre-project.vercel.app'
-
-function getBackendUrl(request?: NextRequest): string {
-  // Always use the deployed backend URL
-  // This ensures V0 preview, local dev, and Vercel all use the real Python backend
-  const backendUrl = process.env.BACKEND_URL || DEPLOYED_BACKEND
-  console.log('[v0] Backend URL resolved to:', backendUrl)
-  return backendUrl
+// Get the backend URL - use the same origin for Vercel deployments
+function getBackendUrl(request: NextRequest): string {
+  // For Vercel deployments, use the same origin (internal routing)
+  const host = request.headers.get('host')
+  const protocol = request.headers.get('x-forwarded-proto') || 'https'
+  
+  if (host) {
+    const url = `${protocol}://${host}`
+    console.log('[v0] Backend URL (same origin):', url)
+    return url
+  }
+  
+  // Fallback for local dev
+  console.log('[v0] Backend URL (fallback): http://localhost:8000')
+  return 'http://localhost:8000'
 }
 
 /**
