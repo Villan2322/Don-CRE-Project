@@ -167,10 +167,29 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         formData.append('files', f.file, f.file.name)
       }
 
-      const response = await fetch('/backend/analyze', {
-        method: 'POST',
-        body: formData,
-      })
+      // Analysis runs several sequential LLM calls and can take a few minutes
+      // on large deals. Use a generous client timeout so the request never
+      // hangs the spinner indefinitely, and surface a clear message if it does.
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 290_000)
+
+      let response: Response
+      try {
+        response = await fetch('/backend/analyze', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        })
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          throw new Error(
+            'Analysis timed out after 5 minutes. Try fewer or smaller documents, then run again.'
+          )
+        }
+        throw err
+      } finally {
+        clearTimeout(timeoutId)
+      }
 
       if (!response.ok) {
         const detail = await response.text().catch(() => '')
