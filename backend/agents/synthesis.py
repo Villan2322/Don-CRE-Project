@@ -40,8 +40,11 @@ class SynthesisAgent(BaseAgent):
         doc_types_present = list(grouped.keys())
         lease_count = len(grouped.get("LEASE", []))
         
-        prompt = SYNTHESIS_PROMPT.format(
-            doc_types_present=", ".join(doc_types_present)
+        # Use replace() instead of format() because SYNTHESIS_PROMPT contains
+        # literal JSON braces ({ "rsf_reconciliation": ... }) that str.format
+        # would misinterpret as replacement fields and raise KeyError.
+        prompt = SYNTHESIS_PROMPT.replace(
+            "{doc_types_present}", ", ".join(doc_types_present)
         )
         
         user_message = f"""Deal Name: {deal_name}

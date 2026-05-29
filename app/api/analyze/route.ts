@@ -264,14 +264,15 @@ function mapDealReadiness(score: number, readiness?: string): DealAnalysis['deal
 }
 
 function mapDocType(type: string | undefined): UploadedDocument['type'] {
-  if (!type) return 'OTHER'
+  if (!type) return 'MANAGEMENT_REPORT'
   const t = type.toLowerCase()
+  if (t.includes('lease') && t.includes('abstract')) return 'LEASE_ABSTRACT'
   if (t.includes('lease')) return 'LEASE'
+  if (t.includes('rent') && (t.includes('xlsx') || t.includes('excel'))) return 'RENT_ROLL_XLSX'
   if (t.includes('rent') || t.includes('roll')) return 'RENT_ROLL'
-  if (t.includes('boma')) return 'BOMA_MEASUREMENT'
-  if (t.includes('operat')) return 'OPERATING_STATEMENT'
-  if (t.includes('ar') || t.includes('aging')) return 'AR_AGING'
+  if (t.includes('boma')) return 'BOMA'
   if (t.includes('cam')) return 'CAM_RECONCILIATION'
-  if (t.includes('estoppel')) return 'ESTOPPEL'
-  return 'OTHER'
+  if (t.includes('county') || t.includes('pa') || t.includes('appraiser')) return 'COUNTY_PA'
+  if (t.includes('financial') || t.includes('model')) return 'FINANCIAL_MODEL'
+  return 'MANAGEMENT_REPORT'
 }
