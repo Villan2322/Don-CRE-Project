@@ -8,32 +8,37 @@ interface MetricsGridProps {
 }
 
 export function MetricsGrid({ deal }: MetricsGridProps) {
+  const { noi, capRate, vacancy, arDelinquency } = deal.financialSummary
+  // Vacancy SF prefers BOMA total; falls back to rent-roll occupied SF basis
+  const vacancyBasisSF =
+    deal.rsfReconciliation.bomaTotalSF || deal.rsfReconciliation.rentRollOccupiedSF || 0
+
   const metrics = [
     {
       label: 'Annual NOI',
-      value: `$${deal.financialSummary.noi.toLocaleString()}`,
+      value: noi !== null ? `$${noi.toLocaleString()}` : 'N/A',
       icon: DollarSign,
-      subtext: `${deal.financialSummary.capRate}% cap rate`,
+      subtext: capRate !== null ? `${capRate}% cap rate` : 'Needs operating statement',
     },
     {
       label: 'WALT',
-      value: `${deal.walt} mo`,
+      value: deal.walt > 0 ? `${deal.walt} mo` : 'N/A',
       icon: Calendar,
       subtext: 'Weighted avg lease term',
     },
     {
       label: 'Vacancy',
-      value: `${deal.financialSummary.vacancy}%`,
+      value: `${vacancy}%`,
       icon: TrendingDown,
-      subtext: `${Math.round(deal.rsfReconciliation.bomaTotalSF * (deal.financialSummary.vacancy / 100)).toLocaleString()} SF`,
-      alert: deal.financialSummary.vacancy > 10,
+      subtext: `${Math.round(vacancyBasisSF * (vacancy / 100)).toLocaleString()} SF`,
+      alert: vacancy > 10,
     },
     {
       label: 'AR Delinquency',
-      value: `$${deal.financialSummary.arDelinquency.toLocaleString()}`,
+      value: arDelinquency !== null ? `$${arDelinquency.toLocaleString()}` : 'N/A',
       icon: AlertCircle,
-      subtext: '60+ days past due',
-      alert: deal.financialSummary.arDelinquency > 0,
+      subtext: arDelinquency !== null ? '60+ days past due' : 'Needs AR aging report',
+      alert: arDelinquency !== null && arDelinquency > 0,
     },
   ]
 

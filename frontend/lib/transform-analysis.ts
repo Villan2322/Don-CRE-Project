@@ -1,105 +1,197 @@
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
 // Transform the raw Python backend response into the frontend DealAnalysis type.
+//
+// The backend returns the bulk of its analysis nested under `synthesis` plus
+// per-document `extractions`. This transform reads from those real locations:
+//   - extractions[].extraction.tenants / building_totals / vacancy_summary / collection_status
+//   - synthesis.lease_audit (walt_months, lease_expiry_schedule)
+//   - synthesis.rent_verification (total_annual_rent, tenant_shares)
+//   - synthesis.financial_summary (noi, occupancy_pct, ar_concerns)
+//   - synthesis.red_flags
+//   - synthesis.what_to_get_next
+//   - synthesis.rsf_reconciliation
+//   - score_summary (overall_score, tier, sub_scores)
 export function transformBackendResponse(data: any, dealName: string): DealAnalysis {
   const now = new Date().toISOString()
   const dealId = data.deal_id || `deal-${Date.now()}`
+  const synthesis = data.synthesis || {}
 
-  // Extract tenants from rent_roll_analysis or extractions
-  const rentRollData = data.rent_roll_analysis || {}
-  const tenantRows = rentRollData.tenants || rentRollData.rows || []
+  // --- Locate the rent roll extraction (per-tenant detail lives here) ---
+  const extractions: any[] = Array.isArray(data.extractions) ? data.extractions : []
+  const rentRollExtraction = extractions.find(
+    (e) => (e.doc_type || e.document_type) === 'RENT_ROLL' || e?.extraction?.tenants
+  )
+  const ex = rentRollExtraction?.extraction || {}
+  const rawTenants: any[] = ex.tenants || []
+  const buildingTotals = ex.building_totals || {}
+  const vacancySummary = ex.vacancy_summary || {}
+  const collectionStatus = ex.collection_status || {}
 
-  const tenants: Tenant[] = tenantRows.map((t: any, i: number) => ({
-    id: t.tenant_id || `t-${i + 1}`,
-    name: t.tenant_name || t.name || `Tenant ${i + 1}`,
-    suite: t.suite || t.unit || '',
-    rsf: parseFloat(t.rsf || t.sf || t.square_feet || 0),
-    bomaRsf: parseFloat(t.boma_rsf || t.rsf_boma || t.rsf || 0),
-    rsfDelta: parseFloat(t.rsf_variance || 0),
-    monthlyRent: parseFloat(t.monthly_rent || t.base_rent || 0),
-    annualRent: parseFloat(t.annual_rent || (t.monthly_rent || 0) * 12),
-    rentPSF: parseFloat(t.rent_psf || t.base_rent_psf || 0),
-    leaseStart: t.lease_start || t.commencement_date || '',
-    leaseExpiry: t.lease_end || t.expiration_date || '',
-    monthsRemaining: t.months_remaining || (t.days_to_expiry ? Math.ceil(t.days_to_expiry / 30) : 12),
-    incomeConcentration: parseFloat(t.income_concentration || t.percent_of_total || 0),
-    riskLevel: mapRiskLevel(t.risk_level),
-    arStatus: t.ar_90_plus > 0 ? 'DELINQUENT' : 'CURRENT',
-    arBalance:
-      parseFloat(t.ar_current || 0) +
-      parseFloat(t.ar_30_days || 0) +
-      parseFloat(t.ar_60_days || 0) +
-      parseFloat(t.ar_90_plus || 0),
-  }))
+  // --- Synthesis sub-objects ---
+  const leaseAudit = synthesis.lease_audit || {}
+  const expirySchedule: any[] = leaseAudit.lease_expiry_schedule || []
+  const rentVerification = synthesis.rent_verification || {}
+  const tenantShares: any[] = rentVerification.tenant_shares || []
+  const financial = synthesis.financial_summary || {}
 
-  // Extract lease abstracts
-  const extractedLeases = data.extractions?.filter((e: any) => (e.doc_type || e.document_type) === 'LEASE') || []
-  const leaseAbstracts: LeaseAbstract[] = extractedLeases.map((l: any, i: number) => {
-    const ex = l.extraction || l
+  // Lookup helpers (match by tenant name, case-insensitive)
+  const norm = (s: string) => (s || '').trim().toLowerCase()
+  const shareByName = new Map<string, number>(
+    tenantShares.map((s) => [norm(s.tenant), Number(s.share_pct) || 0])
+  )
+  const expiryByName = new Map<string, any>(expirySchedule.map((e) => [norm(e.tenant), e]))
+
+  const totalAnnualRentBase =
+    Number(buildingTotals.total_annual_rent) ||
+    Number(rentVerification.total_annual_rent) ||
+    rawTenants.reduce((sum, t) => sum + (Number(t.annual_rent) || Number(t.monthly_rent) * 12 || 0), 0)
+
+  // --- Tenants ---
+  const tenants: Tenant[] = rawTenants.map((t: any, i: number) => {
+    const name = t.tenant_name || t.name || `Tenant ${i + 1}`
+    const annualRent = Number(t.annual_rent) || Number(t.monthly_rent) * 12 || 0
+    const expiryInfo = expiryByName.get(norm(name))
+    const sharePct =
+      shareByName.get(norm(name)) ??
+      (totalAnnualRentBase > 0 ? Math.round((annualRent / totalAnnualRentBase) * 1000) / 10 : 0)
     return {
-      id: l.doc_id || l.lease_id || `la-${i + 1}`,
-      tenantName: ex.tenant_name || '',
-      suite: ex.suite || '',
-      rsf: parseFloat(ex.rsf || 0),
-      commencementDate: ex.lease_start || ex.commencement_date || '',
-      expirationDate: ex.lease_end || ex.expiration_date || '',
-      baseRent: parseFloat(ex.annual_base_rent || ex.annual_rent || 0),
-      escalation: ex.rent_escalation || '',
-      expenseStructure: mapExpenseStructure(ex.expense_structure),
-      camCap: ex.cam_cap || null,
-      renewalOptions: ex.renewal_options || '',
-      tiAllowance: parseFloat(ex.tenant_improvements || 0),
-      remeasurementRights: !!ex.remeasurement_rights,
-      missingFields: l.missing_fields || ex.missing_fields || [],
+      id: t.suite ? `t-${t.suite}` : `t-${i + 1}`,
+      name,
+      suite: t.suite || t.unit || '',
+      rsf: Number(t.rsf) || 0,
+      bomaRsf: Number(t.boma_rsf) || Number(t.rsf) || 0,
+      rsfDelta: Number(t.rsf_variance) || 0,
+      monthlyRent: Number(t.monthly_rent) || Math.round(annualRent / 12),
+      annualRent,
+      rentPSF: Number(t.psf_annual) || Number(t.rent_psf) || 0,
+      leaseStart: t.lease_start || t.commencement_date || '',
+      leaseExpiry: t.lease_end || t.expiration_date || expiryInfo?.expiry || null,
+      monthsRemaining:
+        expiryInfo?.months_remaining ??
+        (t.lease_end ? monthsUntil(t.lease_end) : null),
+      incomeConcentration: sharePct,
+      riskLevel: mapRiskLevel(expiryInfo?.risk_level || t.risk_level),
+      arStatus: 'CURRENT',
+      arBalance: 0,
     }
   })
 
-  // Extract red flags
-  const redFlagsData = data.red_flags_result?.red_flags || data.red_flags || []
-  const redFlags: RedFlag[] = redFlagsData.map((rf: any, i: number) => ({
+  // --- Lease abstracts (only present if LEASE docs were uploaded) ---
+  const extractedLeases = extractions.filter(
+    (e) => (e.doc_type || e.document_type) === 'LEASE'
+  )
+  const leaseAbstracts: LeaseAbstract[] = extractedLeases.map((l: any, i: number) => {
+    const le = l.extraction || l
+    return {
+      id: l.doc_id || `la-${i + 1}`,
+      tenantName: le.tenant_name || '',
+      suite: le.suite || '',
+      rsf: Number(le.rsf) || 0,
+      commencementDate: le.lease_start || le.commencement_date || '',
+      expirationDate: le.lease_end || le.expiration_date || null,
+      baseRent: Number(le.annual_base_rent) || Number(le.annual_rent) || 0,
+      escalation: le.rent_escalation || le.escalation || '',
+      expenseStructure: mapExpenseStructure(le.expense_structure),
+      camCap: le.cam_cap ?? null,
+      renewalOptions: le.renewal_options || null,
+      tiAllowance: Number(le.tenant_improvements) || null,
+      remeasurementRights: !!le.remeasurement_rights,
+      missingFields: le.missing_fields || [],
+    }
+  })
+
+  // --- Red flags (synthesis.red_flags: { severity, flag, impact, resolution }) ---
+  const rawRedFlags: any[] = synthesis.red_flags || data.red_flags_result?.red_flags || []
+  const redFlags: RedFlag[] = rawRedFlags.map((rf: any, i: number) => ({
     id: rf.id || `rf-${i + 1}`,
     severity: mapSeverity(rf.severity),
-    category: rf.category || rf.title || 'Issue',
-    description: rf.description || rf.title || '',
-    impact: rf.financial_impact ? `$${Number(rf.financial_impact).toLocaleString()} impact` : undefined,
-    resolution: rf.recommended_action || '',
+    category: rf.category || categorize(rf.flag || rf.title || rf.description || ''),
+    description: rf.flag || rf.description || rf.title || '',
+    impact: rf.impact || rf.financial_impact || '',
+    resolution: rf.resolution || rf.recommended_action || '',
   }))
 
-  // RSF Reconciliation
-  const rsfData = data.rsf_reconciliation || data.rsf_recovery || {}
+  // --- RSF reconciliation ---
+  const rsfData = synthesis.rsf_reconciliation || data.rsf_reconciliation || {}
+  const deltaPercent = Number(rsfData.variance_percentage ?? rsfData.delta_percent) || 0
   const rsfReconciliation = {
-    bomaTotalSF: parseFloat(rsfData.total_rsf_boma || rsfData.boma_sf || 0),
-    rentRollOccupiedSF: parseFloat(rsfData.total_rsf_rent_roll || rsfData.rent_roll_sf || 0),
-    deltaSF: parseFloat(rsfData.variance_rent_roll_vs_boma || rsfData.delta_sf || 0),
-    deltaPercent: parseFloat(rsfData.variance_percentage || 0),
-    estimatedAnnualRecovery: parseFloat(rsfData.estimated_annual_revenue_impact || rsfData.annual_recovery || 0),
-    alertTriggered: (rsfData.variance_percentage || 0) > 5,
+    bomaTotalSF: Number(rsfData.total_rsf_boma ?? rsfData.boma_sf) || 0,
+    rentRollOccupiedSF:
+      Number(rsfData.total_rsf_rent_roll ?? rsfData.rent_roll_sf) ||
+      Number(buildingTotals.occupied_rsf) ||
+      0,
+    deltaSF: Number(rsfData.variance_sf ?? rsfData.delta_sf) || 0,
+    deltaPercent,
+    estimatedAnnualRecovery:
+      Number(rsfData.estimated_annual_revenue_impact ?? rsfData.annual_recovery) || 0,
+    alertTriggered: Math.abs(deltaPercent) > 5,
   }
 
-  // Financial summary
-  const financialData = data.synthesis || data.financial_summary || {}
-  const totalAnnualRent =
-    tenants.reduce((sum, t) => sum + t.annualRent, 0) || parseFloat(financialData.total_annual_rent || 0)
-  const totalRsf = tenants.reduce((sum, t) => sum + t.rsf, 0)
+  // --- Financial summary ---
+  const occupancyRate = Number(buildingTotals.occupancy_rate ?? financial.occupancy_pct)
+  const vacancy = Number.isFinite(occupancyRate)
+    ? Math.round((100 - occupancyRate) * 10) / 10
+    : Number(vacancySummary.vacancy_rate) || 0
+  const totalRsf = Number(buildingTotals.total_rsf) || tenants.reduce((s, t) => s + t.rsf, 0)
+  const hasArData =
+    collectionStatus.delinquent_tenants !== undefined ||
+    collectionStatus.collection_rate !== undefined
+  const arDelinquency = hasArData ? Number(collectionStatus.delinquent_tenants) > 0 ? null : 0 : null
 
-  // Score
-  const scoreData = data.score_summary || data.deal_score_result || {}
-  const score = scoreData.overall || scoreData.overall_score || 50
-  const tier = mapTier(score, scoreData.deal_readiness)
+  const financialSummary = {
+    totalAnnualRent: totalAnnualRentBase,
+    noi: financial.noi === null || financial.noi === undefined ? null : Number(financial.noi),
+    capRate:
+      financial.cap_rate === null || financial.cap_rate === undefined
+        ? null
+        : Number(financial.cap_rate),
+    averageRentPSF:
+      Number(buildingTotals.average_psf) ||
+      (totalRsf > 0 ? Math.round((totalAnnualRentBase / totalRsf) * 100) / 100 : 0),
+    vacancy,
+    arDelinquency,
+  }
 
-  // What to get next
-  const completenessData = data.completeness_result || {}
-  const whatToGetNext = completenessData.missing_documents ||
-    completenessData.recommendations || [
-      'Additional lease documents',
-      'BOMA measurement report',
-      'AR aging report',
-    ]
+  // --- WALT ---
+  const walt = leaseAudit.walt_months
+    ? Math.round(Number(leaseAudit.walt_months))
+    : tenants.length > 0
+      ? Math.round(
+          tenants.reduce((s, t) => s + (t.monthsRemaining || 0), 0) / tenants.length
+        )
+      : 0
 
-  // Documents processed
-  const processedDocs: UploadedDocument[] = (data.classified_documents || []).map((d: any) => ({
-    id: d.doc_id || d.id || d.document_id || crypto.randomUUID(),
-    filename: d.filename || d.name,
+  // --- Score ---
+  const scoreData = data.score_summary || synthesis.deal_score || {}
+  const score = Number(scoreData.overall_score ?? scoreData.overall) || 0
+  const ss = scoreData.sub_scores || {}
+  const subScores = {
+    dataCompleteness: Number(ss.document_completeness) || 0,
+    rsfAlignment: Number(ss.data_consistency) || 0,
+    financialIntegrity: Number(ss.financial_health) || 0,
+    leaseLeverage: Number(ss.lease_quality) || 0,
+    riskProfile: Number(ss.risk_factors) || 0,
+    documentCoverage: Number(ss.document_completeness) || 0,
+  }
+
+  // --- What to get next (synthesis.what_to_get_next: { document, why_needed, priority }) ---
+  const rawNext: any[] = synthesis.what_to_get_next || data.completeness_result?.missing_documents || []
+  const whatToGetNext: string[] =
+    rawNext.length > 0
+      ? rawNext
+          .slice()
+          .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+          .map((n) => (typeof n === 'string' ? n : n.document || n.name || ''))
+          .filter(Boolean)
+      : ['Operating statement (T12)', 'Lease agreements', 'AR aging report']
+
+  // --- Documents processed ---
+  const classified: any[] = data.classified_documents || []
+  const sourceDocs = classified.length > 0 ? classified : extractions
+  const documents: UploadedDocument[] = sourceDocs.map((d: any, i: number) => ({
+    id: d.doc_id || d.id || d.document_id || `doc-${i + 1}`,
+    filename: d.filename || d.name || `Document ${i + 1}`,
     type: mapDocType(d.doc_type || d.document_type || d.classification),
     uploadedAt: now,
     pageCount: d.page_count || 1,
@@ -109,37 +201,40 @@ export function transformBackendResponse(data: any, dealName: string): DealAnaly
   return {
     id: dealId,
     dealName: data.deal_name || dealName,
-    propertyAddress: data.property_address || `${dealName}, FL`,
+    propertyAddress: data.property_address || dealName,
     submittedAt: now,
     score,
-    tier,
-    dealReadiness: mapDealReadiness(score, scoreData.deal_readiness),
-    subScores: scoreData.sub_scores || {
-      dataCompleteness: 12,
-      rsfAlignment: 10,
-      financialIntegrity: 12,
-      leaseLeverage: 10,
-      riskProfile: 10,
-      documentCoverage: 12,
-    },
+    tier: mapTier(score, scoreData.tier || scoreData.deal_readiness),
+    dealReadiness: mapDealReadiness(score, scoreData.tier || scoreData.deal_readiness),
+    subScores,
     rsfReconciliation,
-    financialSummary: {
-      totalAnnualRent,
-      noi: parseFloat(financialData.noi || totalAnnualRent * 0.72),
-      capRate: parseFloat(financialData.cap_rate || 7.5),
-      averageRentPSF: totalRsf > 0 ? totalAnnualRent / totalRsf : 0,
-      vacancy: parseFloat(financialData.vacancy || 5),
-      arDelinquency: tenants.reduce((sum, t) => sum + t.arBalance, 0),
-    },
-    walt:
-      scoreData.walt ||
-      Math.round(tenants.reduce((sum, t) => sum + (t.monthsRemaining || 0), 0) / Math.max(tenants.length, 1)),
+    financialSummary,
+    walt,
     redFlags,
     whatToGetNext,
     tenants,
     leaseAbstracts,
-    documents: processedDocs,
+    documents,
   }
+}
+
+function monthsUntil(dateStr: string): number | null {
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return null
+  const now = new Date()
+  const months = (d.getFullYear() - now.getFullYear()) * 12 + (d.getMonth() - now.getMonth())
+  return Math.max(0, months)
+}
+
+function categorize(text: string): string {
+  const t = text.toLowerCase()
+  if (t.includes('concentration')) return 'Concentration Risk'
+  if (t.includes('rsf') || t.includes('measurement') || t.includes('sf')) return 'RSF Discrepancy'
+  if (t.includes('ar ') || t.includes('delinqu') || t.includes('collection')) return 'AR Delinquency'
+  if (t.includes('noi') || t.includes('operating') || t.includes('financial')) return 'Financial Data'
+  if (t.includes('roll') || t.includes('expir') || t.includes('walt')) return 'Lease Rollover'
+  if (t.includes('lease') || t.includes('missing')) return 'Missing Documents'
+  return 'Issue'
 }
 
 function mapRiskLevel(level: string | undefined): 'LOW' | 'MEDIUM' | 'HIGH' {
@@ -168,10 +263,11 @@ function mapExpenseStructure(structure: string | undefined): 'NNN' | 'MODIFIED_G
 
 function mapTier(score: number, readiness?: string): 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' {
   if (readiness) {
-    if (readiness.includes('confidence')) return 'GREEN'
-    if (readiness.includes('conditions')) return 'YELLOW'
-    if (readiness.includes('gaps')) return 'ORANGE'
-    if (readiness.includes('Insufficient')) return 'RED'
+    const r = readiness.toLowerCase()
+    if (r.includes('confidence') || r.includes('strong')) return 'GREEN'
+    if (r.includes('conditions') || r.includes('review')) return 'YELLOW'
+    if (r.includes('gaps') || r.includes('caution')) return 'ORANGE'
+    if (r.includes('insufficient') || r.includes('reject')) return 'RED'
   }
   if (score >= 80) return 'GREEN'
   if (score >= 60) return 'YELLOW'
@@ -181,10 +277,11 @@ function mapTier(score: number, readiness?: string): 'GREEN' | 'YELLOW' | 'ORANG
 
 function mapDealReadiness(score: number, readiness?: string): DealAnalysis['dealReadiness'] {
   if (readiness) {
-    if (readiness.includes('confidence')) return 'Proceed with confidence'
-    if (readiness.includes('conditions')) return 'Proceed with conditions'
-    if (readiness.includes('gaps')) return 'Material gaps'
-    return 'Insufficient data'
+    const r = readiness.toLowerCase()
+    if (r.includes('confidence') || r.includes('strong')) return 'Proceed with confidence'
+    if (r.includes('conditions') || r.includes('review')) return 'Proceed with conditions'
+    if (r.includes('gaps') || r.includes('caution')) return 'Material gaps'
+    if (r.includes('insufficient') || r.includes('reject')) return 'Insufficient data'
   }
   if (score >= 80) return 'Proceed with confidence'
   if (score >= 60) return 'Proceed with conditions'

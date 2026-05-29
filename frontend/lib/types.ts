@@ -24,11 +24,11 @@ export interface DealAnalysis {
   }
   financialSummary: {
     totalAnnualRent: number
-    noi: number
-    capRate: number
+    noi: number | null
+    capRate: number | null
     averageRentPSF: number
     vacancy: number
-    arDelinquency: number
+    arDelinquency: number | null
   }
   walt: number
   redFlags: RedFlag[]
