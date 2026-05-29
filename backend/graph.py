@@ -4,10 +4,16 @@ from datetime import datetime, timezone
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-# Enable LangSmith tracing
+# Enable LangSmith tracing - API key must be set in environment as LANGSMITH_API_KEY
 os.environ.setdefault("LANGSMITH_TRACING", "true")
 os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 os.environ.setdefault("LANGSMITH_PROJECT", "CRE Don Project")
+
+# Log tracing status on module load
+_langsmith_key = os.environ.get("LANGSMITH_API_KEY", "")
+print(f"[LangSmith] Tracing enabled: {os.environ.get('LANGSMITH_TRACING')}")
+print(f"[LangSmith] Project: {os.environ.get('LANGSMITH_PROJECT')}")
+print(f"[LangSmith] API Key configured: {'Yes' if _langsmith_key else 'No'}")
 
 from state import CREPipelineState, SingleDocumentState
 from agents.document_parsing import DocumentParsingAgent
