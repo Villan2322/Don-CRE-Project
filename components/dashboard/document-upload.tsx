@@ -137,11 +137,14 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       // Get the actual files for the completed uploads
       const completedFiles = files.filter(f => f.status === 'completed')
       
-      // Convert files to base64 for the API
+      // Convert files to base64 for the API (browser-compatible)
       const filesData = await Promise.all(
         completedFiles.map(async (f) => {
           const arrayBuffer = await f.file.arrayBuffer()
-          const base64 = Buffer.from(arrayBuffer).toString('base64')
+          const uint8Array = new Uint8Array(arrayBuffer)
+          let binary = ''
+          uint8Array.forEach(byte => binary += String.fromCharCode(byte))
+          const base64 = btoa(binary)
           return {
             filename: f.file.name,
             type: f.file.type,
