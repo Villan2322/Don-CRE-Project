@@ -13,7 +13,7 @@ from models.schemas import (
     AnalysisResult,
 )
 from services.document_processor import processor
-from .graph import graph
+from graph import graph
 
 app = fastapi.FastAPI(
     title="CRE Document Intelligence API",

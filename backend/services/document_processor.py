@@ -19,7 +19,7 @@ try:
 except ImportError:
     pd = None
 
-from ..agents import (
+from agents import (
     DocumentClassifierAgent,
     LeaseAbstractionAgent,
     RentRollAgent,
@@ -27,7 +27,7 @@ from ..agents import (
     RiskScoringAgent,
     RedFlagDetectionAgent,
 )
-from ..models.schemas import (
+from models.schemas import (
     DocumentType,
     ProcessingStatus,
     ProcessedDocument,
@@ -207,7 +207,7 @@ class DocumentProcessor:
         )
         
         # Build result
-        from ..models.schemas import DealScore, RSFReconciliation, RedFlag
+        from models.schemas import DealScore, RSFReconciliation, RedFlag
         
         result = AnalysisResult(
             deal_id=deal_id,

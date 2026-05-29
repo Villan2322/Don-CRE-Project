@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from .base import BaseAgent
-from ..config.extraction_prompts import SYNTHESIS_PROMPT
+from config.extraction_prompts import SYNTHESIS_PROMPT
 
 
 class SynthesisAgent(BaseAgent):

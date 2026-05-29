@@ -9,15 +9,15 @@ os.environ.setdefault("LANGSMITH_TRACING", "true")
 os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 os.environ.setdefault("LANGSMITH_PROJECT", "CRE Don Project")
 
-from .state import CREPipelineState, SingleDocumentState
-from .agents.document_parsing import DocumentParsingAgent
-from .agents.ocr_agent import OCRAgent
-from .agents.universal_extractor import UniversalExtractor
-from .agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
-from .agents.document_classifier import DocumentClassifierAgent
-from .agents.rsf_reconciliation import RSFReconciliationAgent
-from .agents.red_flag_detection import RedFlagDetectionAgent
-from .agents.risk_scoring import RiskScoringAgent
+from state import CREPipelineState, SingleDocumentState
+from agents.document_parsing import DocumentParsingAgent
+from agents.ocr_agent import OCRAgent
+from agents.universal_extractor import UniversalExtractor
+from agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
+from agents.document_classifier import DocumentClassifierAgent
+from agents.rsf_reconciliation import RSFReconciliationAgent
+from agents.red_flag_detection import RedFlagDetectionAgent
+from agents.risk_scoring import RiskScoringAgent
 
 _parsing_agent = DocumentParsingAgent()
 _ocr_agent = OCRAgent()
