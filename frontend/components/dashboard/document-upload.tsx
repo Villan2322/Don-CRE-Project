@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DealAnalysis } from '@/lib/types'
+import { transformBackendResponse } from '@/lib/transform-analysis'
 
 interface UploadedFile {
   id: string
@@ -132,58 +133,52 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
   const runAnalysis = async () => {
     setIsAnalyzing(true)
-    
+
     try {
       // Get the actual files for the completed uploads
-      const completedFiles = files.filter(f => f.status === 'completed')
-      
-      // Convert files to base64 for the API (browser-compatible)
-      const filesData = await Promise.all(
-        completedFiles.map(async (f) => {
-          const arrayBuffer = await f.file.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
-          let binary = ''
-          uint8Array.forEach(byte => binary += String.fromCharCode(byte))
-          const base64 = btoa(binary)
-          return {
-            filename: f.file.name,
-            type: f.file.type,
-            data: base64,
-          }
-        })
-      )
-      
-      // Get the deal name from the first document
-      const dealName = uploadedDocuments[0]?.filename
-        ?.replace(/\.(pdf|xlsx|xls|csv)$/i, '')
-        ?.replace(/[-_]/g, ' ')
-        ?.trim() || 'Uploaded Deal'
-      
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          documents: uploadedDocuments,
-          files: filesData,
-          dealName,
-        }),
-      })
-      
-      if (!response.ok) {
-        throw new Error('Analysis failed')
+      const completedFiles = files.filter((f) => f.status === 'completed')
+
+      if (completedFiles.length === 0) {
+        throw new Error('No uploaded files to analyze')
       }
-      
+
+      // Derive a deal name from the first document
+      const dealName =
+        uploadedDocuments[0]?.filename
+          ?.replace(/\.(pdf|xlsx|xls|csv)$/i, '')
+          ?.replace(/[-_]/g, ' ')
+          ?.trim() || 'Uploaded Deal'
+
+      // Build multipart form data with the real File objects and POST directly
+      // to the Python backend. Calling /backend/analyze same-origin from the
+      // browser carries the auth cookie and avoids the server-to-server proxy
+      // that gets blocked by Vercel deployment protection.
+      const formData = new FormData()
+      formData.append('deal_name', dealName)
+      for (const f of completedFiles) {
+        formData.append('files', f.file, f.file.name)
+      }
+
+      const response = await fetch('/backend/analyze', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '')
+        throw new Error(`Analysis failed (${response.status}): ${detail}`)
+      }
+
       const result = await response.json()
-      
+
+      // Transform the raw backend payload into the frontend DealAnalysis shape.
+      const analysis = transformBackendResponse(result, dealName)
+
       setIsAnalyzing(false)
       setAnalysisComplete(true)
-      
-      // Pass the analysis results back to the parent
-      if (result.analysis) {
-        onAnalysisComplete?.(result.analysis)
-      }
+      onAnalysisComplete?.(analysis)
     } catch (error) {
-      console.error('Analysis error:', error)
+      console.error('[v0] Analysis error:', error)
       setIsAnalyzing(false)
     }
   }

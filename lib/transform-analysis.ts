@@ -1,94 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server'
 import { DealAnalysis, Tenant, LeaseAbstract, RedFlag, UploadedDocument } from '@/lib/types'
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { documents, dealName, files } = body
-
-    if (!documents || !Array.isArray(documents) || documents.length === 0) {
-      return NextResponse.json(
-        { error: 'No documents provided for analysis' },
-        { status: 400 }
-      )
-    }
-
-    // Always call the Python backend - no mock fallback
-    const backendUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:3000'
-    
-    console.log('[Analyze] Backend URL:', backendUrl)
-    console.log('[Analyze] Files received:', files?.length || 0)
-    console.log('[Analyze] Documents:', documents.length)
-
-    if (!files || files.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: 'No file data received. Files must be sent as base64 in the files array.',
-      }, { status: 400 })
-    }
-
-    // Create FormData for the Python backend
-    const formData = new FormData()
-    formData.append('deal_name', dealName || 'Untitled Deal')
-    
-    // Attach files from base64
-    for (const file of files) {
-      if (file.data) {
-        const buffer = Buffer.from(file.data, 'base64')
-        const blob = new Blob([buffer], { type: file.type || 'application/octet-stream' })
-        formData.append('files', blob, file.filename)
-        console.log('[Analyze] Added file:', file.filename, 'size:', buffer.length)
-      }
-    }
-    
-    // Call /backend/analyze
-    console.log('[Analyze] Calling backend at:', `${backendUrl}/backend/analyze`)
-    
-    const analyzeResponse = await fetch(`${backendUrl}/backend/analyze`, {
-      method: 'POST',
-      body: formData,
-    })
-    
-    if (!analyzeResponse.ok) {
-      const errorText = await analyzeResponse.text()
-      console.error('[Backend] Analyze failed:', analyzeResponse.status, errorText)
-      return NextResponse.json({
-        success: false,
-        error: `Backend analysis failed (${analyzeResponse.status}): ${errorText}`,
-      }, { status: 500 })
-    }
-    
-    const analyzeResult = await analyzeResponse.json()
-    console.log('[Backend] Analyze result keys:', Object.keys(analyzeResult))
-    
-    // Transform the response
-    const analysis = transformBackendResponse(analyzeResult, dealName || analyzeResult.deal_name || 'Analyzed Deal')
-    
-    return NextResponse.json({
-      success: true,
-      analysis,
-      backend: true,
-    })
-  } catch (error) {
-    console.error('[Analyze] Error:', error)
-    return NextResponse.json({
-      success: false,
-      error: `Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    }, { status: 500 })
-  }
-}
-
-// Transform the raw backend response to frontend DealAnalysis type
-function transformBackendResponse(data: any, dealName: string): DealAnalysis {
+// Transform the raw Python backend response into the frontend DealAnalysis type.
+export function transformBackendResponse(data: any, dealName: string): DealAnalysis {
   const now = new Date().toISOString()
   const dealId = data.deal_id || `deal-${Date.now()}`
-  
+
   // Extract tenants from rent_roll_analysis or extractions
   const rentRollData = data.rent_roll_analysis || {}
   const tenantRows = rentRollData.tenants || rentRollData.rows || []
-  
+
   const tenants: Tenant[] = tenantRows.map((t: any, i: number) => ({
     id: t.tenant_id || `t-${i + 1}`,
     name: t.tenant_name || t.name || `Tenant ${i + 1}`,
@@ -101,31 +21,38 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
     rentPSF: parseFloat(t.rent_psf || t.base_rent_psf || 0),
     leaseStart: t.lease_start || t.commencement_date || '',
     leaseExpiry: t.lease_end || t.expiration_date || '',
-    monthsRemaining: t.months_remaining || t.days_to_expiry ? Math.ceil(t.days_to_expiry / 30) : 12,
+    monthsRemaining: t.months_remaining || (t.days_to_expiry ? Math.ceil(t.days_to_expiry / 30) : 12),
     incomeConcentration: parseFloat(t.income_concentration || t.percent_of_total || 0),
     riskLevel: mapRiskLevel(t.risk_level),
     arStatus: t.ar_90_plus > 0 ? 'DELINQUENT' : 'CURRENT',
-    arBalance: parseFloat(t.ar_current || 0) + parseFloat(t.ar_30_days || 0) + parseFloat(t.ar_60_days || 0) + parseFloat(t.ar_90_plus || 0),
+    arBalance:
+      parseFloat(t.ar_current || 0) +
+      parseFloat(t.ar_30_days || 0) +
+      parseFloat(t.ar_60_days || 0) +
+      parseFloat(t.ar_90_plus || 0),
   }))
 
   // Extract lease abstracts
-  const extractedLeases = data.extractions?.filter((e: any) => e.document_type === 'lease') || []
-  const leaseAbstracts: LeaseAbstract[] = extractedLeases.map((l: any, i: number) => ({
-    id: l.lease_id || `la-${i + 1}`,
-    tenantName: l.tenant_name || '',
-    suite: l.suite || '',
-    rsf: parseFloat(l.rsf || 0),
-    commencementDate: l.lease_start || l.commencement_date || '',
-    expirationDate: l.lease_end || l.expiration_date || '',
-    baseRent: parseFloat(l.annual_base_rent || l.annual_rent || 0),
-    escalation: l.rent_escalation || '',
-    expenseStructure: mapExpenseStructure(l.expense_structure),
-    camCap: l.cam_cap || null,
-    renewalOptions: l.renewal_options || '',
-    tiAllowance: parseFloat(l.tenant_improvements || 0),
-    remeasurementRights: !!l.remeasurement_rights,
-    missingFields: l.missing_fields || [],
-  }))
+  const extractedLeases = data.extractions?.filter((e: any) => (e.doc_type || e.document_type) === 'LEASE') || []
+  const leaseAbstracts: LeaseAbstract[] = extractedLeases.map((l: any, i: number) => {
+    const ex = l.extraction || l
+    return {
+      id: l.doc_id || l.lease_id || `la-${i + 1}`,
+      tenantName: ex.tenant_name || '',
+      suite: ex.suite || '',
+      rsf: parseFloat(ex.rsf || 0),
+      commencementDate: ex.lease_start || ex.commencement_date || '',
+      expirationDate: ex.lease_end || ex.expiration_date || '',
+      baseRent: parseFloat(ex.annual_base_rent || ex.annual_rent || 0),
+      escalation: ex.rent_escalation || '',
+      expenseStructure: mapExpenseStructure(ex.expense_structure),
+      camCap: ex.cam_cap || null,
+      renewalOptions: ex.renewal_options || '',
+      tiAllowance: parseFloat(ex.tenant_improvements || 0),
+      remeasurementRights: !!ex.remeasurement_rights,
+      missingFields: l.missing_fields || ex.missing_fields || [],
+    }
+  })
 
   // Extract red flags
   const redFlagsData = data.red_flags_result?.red_flags || data.red_flags || []
@@ -134,7 +61,7 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
     severity: mapSeverity(rf.severity),
     category: rf.category || rf.title || 'Issue',
     description: rf.description || rf.title || '',
-    impact: rf.financial_impact ? `$${rf.financial_impact.toLocaleString()} impact` : undefined,
+    impact: rf.financial_impact ? `$${Number(rf.financial_impact).toLocaleString()} impact` : undefined,
     resolution: rf.recommended_action || '',
   }))
 
@@ -151,7 +78,8 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
 
   // Financial summary
   const financialData = data.synthesis || data.financial_summary || {}
-  const totalAnnualRent = tenants.reduce((sum, t) => sum + t.annualRent, 0) || parseFloat(financialData.total_annual_rent || 0)
+  const totalAnnualRent =
+    tenants.reduce((sum, t) => sum + t.annualRent, 0) || parseFloat(financialData.total_annual_rent || 0)
   const totalRsf = tenants.reduce((sum, t) => sum + t.rsf, 0)
 
   // Score
@@ -161,23 +89,24 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
 
   // What to get next
   const completenessData = data.completeness_result || {}
-  const whatToGetNext = completenessData.missing_documents || completenessData.recommendations || [
-    'Additional lease documents',
-    'BOMA measurement report',
-    'AR aging report',
-  ]
+  const whatToGetNext = completenessData.missing_documents ||
+    completenessData.recommendations || [
+      'Additional lease documents',
+      'BOMA measurement report',
+      'AR aging report',
+    ]
 
   // Documents processed
   const processedDocs: UploadedDocument[] = (data.classified_documents || []).map((d: any) => ({
-    id: d.id || d.document_id,
+    id: d.doc_id || d.id || d.document_id || crypto.randomUUID(),
     filename: d.filename || d.name,
-    type: mapDocType(d.document_type || d.classification),
+    type: mapDocType(d.doc_type || d.document_type || d.classification),
     uploadedAt: now,
     pageCount: d.page_count || 1,
     status: 'PROCESSED' as const,
   }))
 
-  const analysis: DealAnalysis = {
+  return {
     id: dealId,
     dealName: data.deal_name || dealName,
     propertyAddress: data.property_address || `${dealName}, FL`,
@@ -202,15 +131,15 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
       vacancy: parseFloat(financialData.vacancy || 5),
       arDelinquency: tenants.reduce((sum, t) => sum + t.arBalance, 0),
     },
-    walt: scoreData.walt || Math.round(tenants.reduce((sum, t) => sum + (t.monthsRemaining || 0), 0) / Math.max(tenants.length, 1)),
+    walt:
+      scoreData.walt ||
+      Math.round(tenants.reduce((sum, t) => sum + (t.monthsRemaining || 0), 0) / Math.max(tenants.length, 1)),
     redFlags,
     whatToGetNext,
     tenants,
     leaseAbstracts,
     documents: processedDocs,
   }
-
-  return analysis
 }
 
 function mapRiskLevel(level: string | undefined): 'LOW' | 'MEDIUM' | 'HIGH' {

@@ -126,7 +126,7 @@ async def analyze_deal(
         "pipeline_errors": [], "completed_at": None,
     }
 
-    result = graph.invoke(initial_state)
+    result = await graph.ainvoke(initial_state)
     processor.deals[deal_id] = {"result": result, "raw_data": result}
 
     # Return FULL result directly since serverless can't persist state between calls
