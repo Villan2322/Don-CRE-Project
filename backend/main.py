@@ -129,13 +129,24 @@ async def analyze_deal(
     result = graph.invoke(initial_state)
     processor.deals[deal_id] = {"result": result, "raw_data": result}
 
+    # Return FULL result directly since serverless can't persist state between calls
     return {
         "deal_id": deal_id,
+        "deal_name": deal_name,
         "pipeline_stage": result.get("pipeline_stage"),
         "overall_score": result.get("score_summary", {}).get("overall"),
         "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
         "documents_processed": len(result.get("extractions", [])),
         "errors": result.get("pipeline_errors", []),
+        # Include full data for frontend transformation
+        "classified_documents": result.get("classified_documents", []),
+        "extractions": result.get("extractions", []),
+        "rent_roll_analysis": result.get("rent_roll_analysis", {}),
+        "rsf_reconciliation": result.get("rsf_reconciliation", {}),
+        "red_flags_result": result.get("red_flags_result", {}),
+        "score_summary": result.get("score_summary", {}),
+        "synthesis": result.get("synthesis", {}),
+        "completeness_result": result.get("completeness_result", {}),
     }
 
 

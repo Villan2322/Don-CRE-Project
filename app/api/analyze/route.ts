@@ -50,31 +50,11 @@ export async function POST(request: NextRequest) {
         }
         
         const analyzeResult = await analyzeResponse.json()
-        console.log('[Backend] Analyze result:', analyzeResult)
+        console.log('[Backend] Analyze result keys:', Object.keys(analyzeResult))
         
-        const dealId = analyzeResult.deal_id
-        
-        // Step 2: Fetch the full analysis from /backend/deals/{deal_id}/raw
-        const dealResponse = await fetch(`${backendUrl}/backend/deals/${dealId}/raw`, {
-          method: 'GET',
-        })
-        
-        if (!dealResponse.ok) {
-          console.error('[Backend] Failed to fetch deal data:', dealResponse.status)
-          // Return partial result if we can't get full details
-          return NextResponse.json({
-            success: true,
-            analysis: transformPartialResult(analyzeResult, dealName),
-            backend: true,
-            partial: true,
-          })
-        }
-        
-        const dealData = await dealResponse.json()
-        console.log('[Backend] Deal data keys:', Object.keys(dealData))
-        
-        // Transform backend response to frontend DealAnalysis type
-        const analysis = transformBackendResponse(dealData, dealName || 'Analyzed Deal')
+        // The backend now returns full data directly (serverless can't persist state)
+        // Transform the response directly instead of making a second call
+        const analysis = transformBackendResponse(analyzeResult, dealName || analyzeResult.deal_name || 'Analyzed Deal')
         
         return NextResponse.json({
           success: true,
