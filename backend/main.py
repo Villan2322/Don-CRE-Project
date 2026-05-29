@@ -36,6 +36,45 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "cre-document-intelligence"}
 
 
+@app.get("/diagnostics")
+async def diagnostics() -> dict:
+    """
+    Backend self-check for monitoring. Reports which credentials and
+    capabilities are available WITHOUT leaking any secret values, so you can
+    tell at a glance why analysis might be failing.
+    """
+    import os
+
+    anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    gateway_token = bool(os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip())
+
+    # Optional libraries (text extraction). OCR no longer needs system binaries.
+    def _has(mod: str) -> bool:
+        try:
+            __import__(mod)
+            return True
+        except Exception:
+            return False
+
+    return {
+        "status": "ok",
+        "service": "cre-document-intelligence",
+        "credentials": {
+            "anthropic_api_key_set": anthropic_key,
+            "anthropic_gateway_token_set": gateway_token,
+            "llm_reachable": anthropic_key or gateway_token,
+        },
+        "capabilities": {
+            "pdf_text_extraction": _has("PyPDF2"),
+            "excel_extraction": _has("openpyxl"),
+            "vision_ocr": "claude_native",  # no tesseract/poppler needed
+        },
+        "model": os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        "langsmith_tracing": os.environ.get("LANGSMITH_TRACING") == "true"
+        and bool(os.environ.get("LANGSMITH_API_KEY", "").strip()),
+    }
+
+
 @app.post("/documents/upload", response_model=UploadResponse)
 async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
     """
@@ -127,8 +166,57 @@ async def analyze_deal(
         "pipeline_errors": [], "completed_at": None,
     }
 
+    print(f"[ANALYZE] deal={deal_name} id={deal_id} files={list(raw_files.keys())}")
     result = await graph.ainvoke(initial_state)
     processor.deals[deal_id] = {"result": result, "raw_data": result}
+
+    # Collect EVERY error/warning from every stage. Previously only
+    # pipeline_errors was returned, so failures during ingest/OCR,
+    # classification, or extraction were silently swallowed and the deal just
+    # showed up as 0/100 with no explanation.
+    ingest_errors = result.get("ingest_errors", []) or []
+    classification_errors = result.get("classification_errors", []) or []
+    extraction_errors = result.get("extraction_errors", []) or []
+    pipeline_errors = result.get("pipeline_errors", []) or []
+    synthesis_error = result.get("synthesis_error")
+
+    all_errors = (
+        [f"ingest: {e}" for e in ingest_errors]
+        + [f"classify: {e}" for e in classification_errors]
+        + [f"extract: {e}" for e in extraction_errors]
+        + [f"pipeline: {e}" for e in pipeline_errors]
+        + ([f"synthesis: {synthesis_error}"] if synthesis_error else [])
+    )
+
+    extractions = result.get("extractions", [])
+    raw_docs = result.get("raw_documents", [])
+    classified = result.get("classified_documents", [])
+
+    # Per-document trace so the UI / logs can show exactly what happened to each
+    # uploaded file (was it parsed? did OCR run? what type? did it extract?).
+    doc_trace = []
+    extraction_by_id = {e.get("doc_id"): e for e in extractions}
+    for cd in classified:
+        ext = extraction_by_id.get(cd.get("doc_id"), {})
+        doc_trace.append({
+            "filename": cd.get("filename"),
+            "doc_type": cd.get("doc_type"),
+            "classification_confidence": cd.get("classification_confidence"),
+            "ocr_performed": cd.get("ocr_performed"),
+            "parse_method": cd.get("parse_method"),
+            "text_chars": len(cd.get("extracted_text", "") or ""),
+            "extracted": bool(ext.get("extraction")),
+            "extraction_error": ext.get("parse_error"),
+        })
+
+    print(
+        f"[ANALYZE] done stage={result.get('pipeline_stage')} "
+        f"raw_docs={len(raw_docs)} classified={len(classified)} "
+        f"extractions={len(extractions)} errors={len(all_errors)}"
+    )
+    if all_errors:
+        for e in all_errors:
+            print(f"[ANALYZE][error] {e}")
 
     # Return FULL result directly since serverless can't persist state between calls
     return {
@@ -137,11 +225,20 @@ async def analyze_deal(
         "pipeline_stage": result.get("pipeline_stage"),
         "overall_score": result.get("score_summary", {}).get("overall"),
         "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
-        "documents_processed": len(result.get("extractions", [])),
-        "errors": result.get("pipeline_errors", []),
+        "documents_uploaded": len(raw_files),
+        "documents_parsed": len(raw_docs),
+        "documents_processed": len(extractions),
+        # Full, categorized error reporting
+        "errors": all_errors,
+        "ingest_errors": ingest_errors,
+        "classification_errors": classification_errors,
+        "extraction_errors": extraction_errors,
+        "pipeline_errors": pipeline_errors,
+        "synthesis_error": synthesis_error,
+        "document_trace": doc_trace,
         # Include full data for frontend transformation
-        "classified_documents": result.get("classified_documents", []),
-        "extractions": result.get("extractions", []),
+        "classified_documents": classified,
+        "extractions": extractions,
         "rent_roll_analysis": result.get("rent_roll_analysis", {}),
         "rsf_reconciliation": result.get("rsf_reconciliation", {}),
         "red_flags_result": result.get("red_flags_result", {}),

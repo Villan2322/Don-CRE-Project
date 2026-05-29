@@ -46,6 +46,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -141,6 +142,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const runAnalysis = async () => {
     setIsAnalyzing(true)
     setAnalysisError(null)
+    setAnalysisWarnings([])
 
     try {
       // Get the actual files for the completed uploads
@@ -197,6 +199,42 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       }
 
       const result = await response.json()
+
+      // Surface backend-side warnings even when the request succeeded (HTTP
+      // 200). The pipeline can "succeed" while silently dropping every
+      // document at the ingest/OCR/extraction stage — that is exactly what
+      // produces a 0/100 "Insufficient Data" result with no tenants. The
+      // backend now returns categorized errors + a per-document trace.
+      const warnings: string[] = []
+      const backendErrors: string[] = Array.isArray(result.errors) ? result.errors : []
+      if (backendErrors.length > 0) warnings.push(...backendErrors)
+
+      const uploaded = Number(result.documents_uploaded ?? completedFiles.length)
+      const processed = Number(result.documents_processed ?? 0)
+      if (processed === 0 && uploaded > 0) {
+        warnings.push(
+          `No data could be extracted from any of the ${uploaded} uploaded document(s). ` +
+            `This usually means the file is a scanned/image PDF or the document type was not recognized.`
+        )
+      } else if (processed < uploaded) {
+        warnings.push(`Only ${processed} of ${uploaded} documents were successfully processed.`)
+      }
+
+      const trace: any[] = Array.isArray(result.document_trace) ? result.document_trace : []
+      for (const d of trace) {
+        if (!d.extracted) {
+          warnings.push(
+            `"${d.filename}" — type ${d.doc_type || 'UNKNOWN'}, ` +
+              `${d.text_chars || 0} chars read${d.ocr_performed ? ' (OCR)' : ''}` +
+              `${d.extraction_error ? `: ${d.extraction_error}` : ' — no fields extracted'}`
+          )
+        }
+      }
+
+      if (warnings.length > 0) {
+        console.warn('[v0] Analysis warnings:', warnings)
+        setAnalysisWarnings(warnings)
+      }
 
       // Transform the raw backend payload into the frontend DealAnalysis shape.
       const analysis = transformBackendResponse(result, dealName)
@@ -457,6 +495,28 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <div>
               <p className="text-sm font-medium text-destructive">Analysis failed</p>
               <p className="mt-1 break-words text-xs text-muted-foreground">{analysisError}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Analysis Warnings (succeeded but some/all docs produced no data) */}
+      {analysisWarnings.length > 0 && (
+        <Card className="border-yellow-500/50 bg-yellow-500/5">
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-500" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+                Analysis completed with warnings
+              </p>
+              <ul className="mt-2 space-y-1">
+                {analysisWarnings.map((w, i) => (
+                  <li key={i} className="break-words text-xs text-muted-foreground">
+                    {'• '}
+                    {w}
+                  </li>
+                ))}
+              </ul>
             </div>
           </CardContent>
         </Card>

@@ -80,6 +80,71 @@ class BaseAgent:
                 await asyncio.sleep(min(2 ** attempt, 30))
         raise last_error if last_error else RuntimeError("LLM call failed")
 
+    async def call_llm_with_documents(
+        self,
+        system_prompt: str,
+        user_message: str,
+        documents: list[dict],
+        max_tokens: int = 8000,
+        temperature: float = 0.0,
+    ) -> str:
+        """
+        Call Claude with one or more visual documents (PDF or image).
+
+        This uses Anthropic's native PDF/vision support so we can read scanned
+        / image-based documents WITHOUT system OCR binaries (tesseract/poppler),
+        which are not available in the serverless runtime.
+
+        `documents` is a list of dicts:
+          {"kind": "pdf"|"image", "media_type": "...", "data": "<base64>"}
+        """
+        import asyncio
+
+        content_blocks: list[dict] = []
+        for doc in documents:
+            if doc["kind"] == "pdf":
+                content_blocks.append({
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": doc["data"],
+                    },
+                })
+            else:  # image
+                content_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": doc["media_type"],
+                        "data": doc["data"],
+                    },
+                })
+        content_blocks.append({"type": "text", "text": user_message})
+
+        def _call():
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": content_blocks}],
+            )
+            return response.content[0].text
+
+        max_attempts = 5
+        last_error: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            try:
+                return await asyncio.get_event_loop().run_in_executor(None, _call)
+            except Exception as e:  # noqa: BLE001 - re-raised after retries
+                last_error = e
+                status = getattr(e, "status_code", None)
+                retriable = status in (408, 409, 429, 500, 502, 503, 504, 529)
+                if not retriable or attempt == max_attempts - 1:
+                    raise
+                await asyncio.sleep(min(2 ** attempt, 30))
+        raise last_error if last_error else RuntimeError("Vision LLM call failed")
+
     async def analyze(self, content: str, context: Optional[dict] = None) -> dict:
         user_content = self._format_input(content, context)
         try:

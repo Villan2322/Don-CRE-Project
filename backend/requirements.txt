@@ -7,6 +7,7 @@ langgraph>=0.2.0
 python-dateutil>=2.8.0
 PyPDF2>=3.0.0
 openpyxl>=3.1.0
-pytesseract>=0.3.10
-pdf2image>=1.16.0
-Pillow>=10.0.0
+# OCR for scanned/image documents is handled by Claude's native PDF + vision
+# support (see agents/ocr_agent.py). We intentionally do NOT use tesseract /
+# pdf2image / Pillow here because those require system binaries (tesseract,
+# poppler) that are not available in the serverless runtime.
