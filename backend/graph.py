@@ -5,8 +5,9 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
 # Enable LangSmith tracing
-os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-os.environ.setdefault("LANGCHAIN_PROJECT", "cre-document-intelligence")
+os.environ.setdefault("LANGSMITH_TRACING", "true")
+os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+os.environ.setdefault("LANGSMITH_PROJECT", "CRE Don Project")
 
 from .state import CREPipelineState, SingleDocumentState
 from .agents.document_parsing import DocumentParsingAgent
