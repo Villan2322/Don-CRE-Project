@@ -13,85 +13,70 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // In production (Vercel deployment), call the Python backend
-    const isProduction = process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'
+    // Always call the Python backend - no mock fallback
+    const backendUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000'
     
-    console.log('[Analyze] Environment:', process.env.VERCEL_ENV, 'isProduction:', isProduction, 'files:', files?.length || 0)
-    
-    if (isProduction && files && files.length > 0) {
-      try {
-        const backendUrl = process.env.VERCEL_URL 
-          ? `https://${process.env.VERCEL_URL}` 
-          : ''
-        
-        console.log('[Backend] Starting analysis with', files.length, 'files')
-        
-        // Create FormData for the Python backend
-        const formData = new FormData()
-        formData.append('deal_name', dealName || 'Untitled Deal')
-        
-        // Attach files if provided as base64
-        for (const file of files) {
-          if (file.data) {
-            const buffer = Buffer.from(file.data, 'base64')
-            const blob = new Blob([buffer], { type: file.type || 'application/octet-stream' })
-            formData.append('files', blob, file.filename)
-          }
-        }
-        
-        // Step 1: Call /backend/analyze to start the pipeline
-        const analyzeResponse = await fetch(`${backendUrl}/backend/analyze`, {
-          method: 'POST',
-          body: formData,
-        })
-        
-        if (!analyzeResponse.ok) {
-          const errorText = await analyzeResponse.text()
-          console.error('[Backend] Analyze failed:', analyzeResponse.status, errorText)
-          throw new Error(`Backend analyze failed: ${errorText}`)
-        }
-        
-        const analyzeResult = await analyzeResponse.json()
-        console.log('[Backend] Analyze result keys:', Object.keys(analyzeResult))
-        
-        // The backend now returns full data directly (serverless can't persist state)
-        // Transform the response directly instead of making a second call
-        const analysis = transformBackendResponse(analyzeResult, dealName || analyzeResult.deal_name || 'Analyzed Deal')
-        
-        return NextResponse.json({
-          success: true,
-          analysis,
-          backend: true,
-        })
-      } catch (backendError) {
-        console.error('[Backend] Connection failed:', backendError)
-        // Return error response instead of falling back to mock
-        return NextResponse.json({
-          success: false,
-          error: `Backend failed: ${backendError instanceof Error ? backendError.message : 'Unknown error'}`,
-          backend: false,
-          attempted: true,
-        }, { status: 500 })
-      }
+    console.log('[Analyze] Backend URL:', backendUrl)
+    console.log('[Analyze] Files received:', files?.length || 0)
+    console.log('[Analyze] Documents:', documents.length)
+
+    if (!files || files.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'No file data received. Files must be sent as base64 in the files array.',
+      }, { status: 400 })
     }
 
-    // Fallback: Mock analysis for local development only
-    console.log('[Mock] Using mock analysis - not in production or no files')
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    const analysis = generateMockAnalysis(documents, dealName)
-
+    // Create FormData for the Python backend
+    const formData = new FormData()
+    formData.append('deal_name', dealName || 'Untitled Deal')
+    
+    // Attach files from base64
+    for (const file of files) {
+      if (file.data) {
+        const buffer = Buffer.from(file.data, 'base64')
+        const blob = new Blob([buffer], { type: file.type || 'application/octet-stream' })
+        formData.append('files', blob, file.filename)
+        console.log('[Analyze] Added file:', file.filename, 'size:', buffer.length)
+      }
+    }
+    
+    // Call /backend/analyze
+    console.log('[Analyze] Calling backend at:', `${backendUrl}/backend/analyze`)
+    
+    const analyzeResponse = await fetch(`${backendUrl}/backend/analyze`, {
+      method: 'POST',
+      body: formData,
+    })
+    
+    if (!analyzeResponse.ok) {
+      const errorText = await analyzeResponse.text()
+      console.error('[Backend] Analyze failed:', analyzeResponse.status, errorText)
+      return NextResponse.json({
+        success: false,
+        error: `Backend analysis failed (${analyzeResponse.status}): ${errorText}`,
+      }, { status: 500 })
+    }
+    
+    const analyzeResult = await analyzeResponse.json()
+    console.log('[Backend] Analyze result keys:', Object.keys(analyzeResult))
+    
+    // Transform the response
+    const analysis = transformBackendResponse(analyzeResult, dealName || analyzeResult.deal_name || 'Analyzed Deal')
+    
     return NextResponse.json({
       success: true,
       analysis,
-      backend: false,
+      backend: true,
     })
   } catch (error) {
-    console.error('Analysis error:', error)
-    return NextResponse.json(
-      { error: 'Failed to run analysis' },
-      { status: 500 }
-    )
+    console.error('[Analyze] Error:', error)
+    return NextResponse.json({
+      success: false,
+      error: `Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    }, { status: 500 })
   }
 }
 
@@ -228,30 +213,6 @@ function transformBackendResponse(data: any, dealName: string): DealAnalysis {
   return analysis
 }
 
-function transformPartialResult(result: any, dealName?: string): DealAnalysis {
-  const now = new Date().toISOString()
-  return {
-    id: result.deal_id,
-    dealName: dealName || 'Analyzed Deal',
-    propertyAddress: '',
-    submittedAt: now,
-    score: result.overall_score || 50,
-    tier: result.deal_readiness === 'Proceed with confidence' ? 'GREEN' :
-          result.deal_readiness === 'Proceed with conditions' ? 'YELLOW' :
-          result.deal_readiness === 'Material gaps' ? 'ORANGE' : 'RED',
-    dealReadiness: result.deal_readiness || 'Proceed with conditions',
-    subScores: { dataCompleteness: 10, rsfAlignment: 10, financialIntegrity: 10, leaseLeverage: 10, riskProfile: 10, documentCoverage: 10 },
-    rsfReconciliation: { bomaTotalSF: 0, rentRollOccupiedSF: 0, deltaSF: 0, deltaPercent: 0, estimatedAnnualRecovery: 0, alertTriggered: false },
-    financialSummary: { totalAnnualRent: 0, noi: 0, capRate: 0, averageRentPSF: 0, vacancy: 0, arDelinquency: 0 },
-    walt: 0,
-    redFlags: [],
-    whatToGetNext: ['Analysis in progress - refresh for full results'],
-    tenants: [],
-    leaseAbstracts: [],
-    documents: [],
-  }
-}
-
 function mapRiskLevel(level: string | undefined): 'LOW' | 'MEDIUM' | 'HIGH' {
   if (!level) return 'LOW'
   const l = level.toLowerCase()
@@ -313,47 +274,4 @@ function mapDocType(type: string | undefined): UploadedDocument['type'] {
   if (t.includes('cam')) return 'CAM_RECONCILIATION'
   if (t.includes('estoppel')) return 'ESTOPPEL'
   return 'OTHER'
-}
-
-// Mock analysis generator for local development
-function generateMockAnalysis(documents: any[], dealName?: string): DealAnalysis {
-  const dealId = `deal-${Date.now()}`
-  const now = new Date().toISOString()
-  
-  const firstDoc = documents[0]?.filename || 'Unknown Property'
-  const propertyName = dealName || firstDoc
-    .replace(/\.(pdf|xlsx|xls|csv)$/i, '')
-    .replace(/[-_]/g, ' ')
-    .replace(/\b(rent roll|lease|boma|feb|jan|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4}|\(\d+\))/gi, '')
-    .trim() || 'Uploaded Property'
-
-  const tenants: Tenant[] = [
-    { id: 't-001', name: 'Anchor Tenant Corp', suite: '100', rsf: 8500, bomaRsf: 9200, rsfDelta: 700, monthlyRent: 8925, annualRent: 107100, rentPSF: 12.6, leaseStart: '2021-03-01', leaseExpiry: '2031-02-28', monthsRemaining: 58, incomeConcentration: 35, riskLevel: 'LOW', arStatus: 'CURRENT', arBalance: 0 },
-    { id: 't-002', name: 'Regional Services LLC', suite: '200', rsf: 4200, bomaRsf: 4600, rsfDelta: 400, monthlyRent: 4620, annualRent: 55440, rentPSF: 13.2, leaseStart: '2022-06-01', leaseExpiry: '2027-05-31', monthsRemaining: 13, incomeConcentration: 18, riskLevel: 'MEDIUM', arStatus: 'CURRENT', arBalance: 0 },
-    { id: 't-003', name: 'Local Retail Inc', suite: '105', rsf: 3100, bomaRsf: 3400, rsfDelta: 300, monthlyRent: 3410, annualRent: 40920, rentPSF: 13.2, leaseStart: '2023-01-15', leaseExpiry: '2028-01-14', monthsRemaining: 20, incomeConcentration: 13, riskLevel: 'LOW', arStatus: 'CURRENT', arBalance: 0 },
-  ]
-
-  const redFlags: RedFlag[] = [
-    { id: 'rf-001', severity: 'HIGH', category: 'Near-term Rollover', description: '1 tenant with lease expiring within 12 months', impact: '18% of income at risk', resolution: 'Request renewal status' },
-    { id: 'rf-002', severity: 'MEDIUM', category: 'Missing Documents', description: 'No lease documents uploaded', impact: 'Cannot verify lease terms', resolution: 'Upload executed leases' },
-  ]
-
-  return {
-    id: dealId,
-    dealName: propertyName,
-    propertyAddress: `${propertyName}, FL`,
-    submittedAt: now,
-    score: 55,
-    tier: 'YELLOW',
-    dealReadiness: 'Proceed with conditions',
-    subScores: { dataCompleteness: 12, rsfAlignment: 10, financialIntegrity: 12, leaseLeverage: 8, riskProfile: 8, documentCoverage: 10 },
-    rsfReconciliation: { bomaTotalSF: 17200, rentRollOccupiedSF: 15800, deltaSF: 1400, deltaPercent: 8.1, estimatedAnnualRecovery: 16100, alertTriggered: true },
-    financialSummary: { totalAnnualRent: 203460, noi: 146492, capRate: 7.8, averageRentPSF: 12.9, vacancy: 8.1, arDelinquency: 0 },
-    walt: 30,
-    redFlags,
-    whatToGetNext: ['Executed lease documents', 'BOMA measurement report', 'AR aging report'],
-    tenants,
-    leaseAbstracts: [],
-    documents: documents.map((d, i) => ({ id: d.id || `doc-${i}`, filename: d.filename, type: 'RENT_ROLL' as const, uploadedAt: now, pageCount: 5, status: 'PROCESSED' as const })),
-  }
 }
