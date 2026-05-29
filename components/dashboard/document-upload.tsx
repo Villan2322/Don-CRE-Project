@@ -134,10 +134,36 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     setIsAnalyzing(true)
     
     try {
+      // Get the actual files for the completed uploads
+      const completedFiles = files.filter(f => f.status === 'completed')
+      
+      // Convert files to base64 for the API
+      const filesData = await Promise.all(
+        completedFiles.map(async (f) => {
+          const arrayBuffer = await f.file.arrayBuffer()
+          const base64 = Buffer.from(arrayBuffer).toString('base64')
+          return {
+            filename: f.file.name,
+            type: f.file.type,
+            data: base64,
+          }
+        })
+      )
+      
+      // Get the deal name from the first document
+      const dealName = uploadedDocuments[0]?.filename
+        ?.replace(/\.(pdf|xlsx|xls|csv)$/i, '')
+        ?.replace(/[-_]/g, ' ')
+        ?.trim() || 'Uploaded Deal'
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documents: uploadedDocuments }),
+        body: JSON.stringify({ 
+          documents: uploadedDocuments,
+          files: filesData,
+          dealName,
+        }),
       })
       
       if (!response.ok) {
