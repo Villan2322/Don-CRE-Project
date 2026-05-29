@@ -16,6 +16,8 @@ export async function POST(request: NextRequest) {
     // In production (Vercel deployment), call the Python backend
     const isProduction = process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'
     
+    console.log('[Analyze] Environment:', process.env.VERCEL_ENV, 'isProduction:', isProduction, 'files:', files?.length || 0)
+    
     if (isProduction && files && files.length > 0) {
       try {
         const backendUrl = process.env.VERCEL_URL 
@@ -63,12 +65,18 @@ export async function POST(request: NextRequest) {
         })
       } catch (backendError) {
         console.error('[Backend] Connection failed:', backendError)
-        // Fall through to mock data
+        // Return error response instead of falling back to mock
+        return NextResponse.json({
+          success: false,
+          error: `Backend failed: ${backendError instanceof Error ? backendError.message : 'Unknown error'}`,
+          backend: false,
+          attempted: true,
+        }, { status: 500 })
       }
     }
 
-    // Fallback: Mock analysis for local development or if backend unavailable
-    console.log('[Mock] Using mock analysis')
+    // Fallback: Mock analysis for local development only
+    console.log('[Mock] Using mock analysis - not in production or no files')
     await new Promise(resolve => setTimeout(resolve, 2000))
 
     const analysis = generateMockAnalysis(documents, dealName)
