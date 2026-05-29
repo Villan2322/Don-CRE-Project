@@ -64,7 +64,8 @@ async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
     return UploadResponse(
         message=f"Document '{file.filename}' uploaded and classified as {doc.document_type.value}",
         document_id=doc.id,
-        status=doc.status
+        status=doc.status,
+        document_type=doc.document_type.value
     )
 
 

@@ -45,6 +45,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
@@ -79,23 +80,27 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       const formData = new FormData()
       formData.append('file', uploadedFile.file)
 
-      const response = await fetch('/api/documents/upload', {
+      // Call the Python backend directly from the browser. Same-origin
+      // /backend/* requests carry the auth cookie, so they pass Vercel
+      // deployment protection (unlike a server-to-server proxy call).
+      const response = await fetch('/backend/documents/upload', {
         method: 'POST',
         body: formData,
       })
 
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const detail = await response.text().catch(() => '')
+        throw new Error(`Upload failed (${response.status}): ${detail.slice(0, 200)}`)
       }
 
       const result = await response.json()
-      const docType = result.classification || 'Unknown'
+      const docType = result.document_type || result.status || 'Uploaded'
 
       // Store the uploaded document info for analysis
       setUploadedDocuments((prev) => [
         ...prev,
         {
-          id: result.documentId,
+          id: result.document_id,
           filename: uploadedFile.file.name,
           type: docType,
         },
@@ -114,10 +119,12 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         )
       )
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed'
+      console.error('[v0] Upload error:', message)
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadedFile.id
-            ? { ...f, status: 'error' as const, error: 'Upload failed' }
+            ? { ...f, status: 'error' as const, error: message }
             : f
         )
       )
@@ -133,6 +140,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
   const runAnalysis = async () => {
     setIsAnalyzing(true)
+    setAnalysisError(null)
 
     try {
       // Get the actual files for the completed uploads
@@ -178,7 +186,9 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
       setAnalysisComplete(true)
       onAnalysisComplete?.(analysis)
     } catch (error) {
-      console.error('[v0] Analysis error:', error)
+      const message = error instanceof Error ? error.message : 'Analysis failed'
+      console.error('[v0] Analysis error:', message)
+      setAnalysisError(message)
       setIsAnalyzing(false)
     }
   }
@@ -416,6 +426,19 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                 </>
               )}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Analysis Error */}
+      {analysisError && (
+        <Card className="border-destructive/50 bg-destructive/5">
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="text-sm font-medium text-destructive">Analysis failed</p>
+              <p className="mt-1 break-words text-xs text-muted-foreground">{analysisError}</p>
+            </div>
           </CardContent>
         </Card>
       )}

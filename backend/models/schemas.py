@@ -142,6 +142,7 @@ class UploadResponse(BaseModel):
     message: str
     document_id: str
     status: ProcessingStatus
+    document_type: Optional[str] = None
 
 
 class AnalysisRequest(BaseModel):
