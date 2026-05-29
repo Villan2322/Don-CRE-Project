@@ -307,7 +307,7 @@ function generateAnalysis(documents: { id: string; filename: string; type: strin
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { documents, dealName } = body
+    const { documents, dealName, files } = body
 
     if (!documents || !Array.isArray(documents) || documents.length === 0) {
       return NextResponse.json(
@@ -316,7 +316,62 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Simulate processing time for AI analysis
+    // In production (Vercel deployment), call the Python backend
+    const isProduction = process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'
+    
+    if (isProduction && files && files.length > 0) {
+      try {
+        const backendUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : ''
+        
+        // Create FormData for the Python backend
+        const formData = new FormData()
+        formData.append('deal_name', dealName || 'Untitled Deal')
+        
+        // Attach files if provided as base64
+        for (const file of files) {
+          if (file.data) {
+            const blob = new Blob([Buffer.from(file.data, 'base64')], { type: file.type })
+            formData.append('files', blob, file.filename)
+          }
+        }
+        
+        const backendResponse = await fetch(`${backendUrl}/backend/analyze`, {
+          method: 'POST',
+          body: formData,
+        })
+        
+        if (backendResponse.ok) {
+          const result = await backendResponse.json()
+          
+          // Transform backend response to match frontend DealAnalysis type
+          // The Python backend returns a different structure, so we need to adapt
+          return NextResponse.json({
+            success: true,
+            analysis: {
+              id: result.deal_id,
+              dealName: dealName || 'Analyzed Deal',
+              score: result.overall_score || 50,
+              tier: result.deal_readiness === 'Proceed with confidence' ? 'GREEN' :
+                    result.deal_readiness === 'Proceed with conditions' ? 'YELLOW' :
+                    result.deal_readiness === 'Material gaps' ? 'ORANGE' : 'RED',
+              dealReadiness: result.deal_readiness || 'Proceed with conditions',
+              documentsProcessed: result.documents_processed,
+              pipelineStage: result.pipeline_stage,
+              errors: result.errors,
+              // Additional fields would come from /deals/{deal_id} endpoint
+            },
+            backend: true,
+          })
+        }
+        console.error('Backend analysis failed, using mock:', await backendResponse.text())
+      } catch (backendError) {
+        console.error('Backend connection failed, using mock:', backendError)
+      }
+    }
+
+    // Fallback: Mock analysis for local development or if backend unavailable
     await new Promise(resolve => setTimeout(resolve, 2000))
 
     // Generate analysis
@@ -330,6 +385,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       analysis,
+      backend: false,
     })
   } catch (error) {
     console.error('Analysis error:', error)

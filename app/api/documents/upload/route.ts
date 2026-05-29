@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Document type classification based on filename patterns
+// Document type classification based on filename patterns (fallback for local dev)
 function classifyDocument(filename: string): string {
   const lowerName = filename.toLowerCase()
   
@@ -67,15 +67,46 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Classify the document
+    // In production (Vercel deployment), call the Python backend
+    const isProduction = process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'
+    
+    if (isProduction) {
+      try {
+        // Forward the file to Python backend
+        const backendFormData = new FormData()
+        backendFormData.append('file', file)
+        
+        const backendUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : ''
+        
+        const backendResponse = await fetch(`${backendUrl}/backend/documents/upload`, {
+          method: 'POST',
+          body: backendFormData,
+        })
+        
+        if (backendResponse.ok) {
+          const result = await backendResponse.json()
+          return NextResponse.json({
+            success: true,
+            documentId: result.document_id,
+            filename: file.name,
+            size: file.size,
+            type: file.type,
+            message: result.message,
+            classification: result.status || 'Processing',
+            backend: true,
+          })
+        }
+        // Fall through to mock if backend fails
+        console.error('Backend upload failed, using mock:', await backendResponse.text())
+      } catch (backendError) {
+        console.error('Backend connection failed, using mock:', backendError)
+      }
+    }
+
+    // Fallback: Mock classification for local development or if backend unavailable
     const documentType = classifyDocument(file.name)
-
-    // In production, this would:
-    // 1. Upload to blob storage (Vercel Blob, S3, etc.)
-    // 2. Store metadata in database
-    // 3. Queue for AI processing
-
-    // For now, return success with classification
     const documentId = crypto.randomUUID()
 
     return NextResponse.json({
@@ -86,6 +117,7 @@ export async function POST(request: NextRequest) {
       type: file.type,
       message: `Document uploaded and classified as ${documentType}`,
       classification: documentType,
+      backend: false,
     })
   } catch (error) {
     console.error('Upload error:', error)
