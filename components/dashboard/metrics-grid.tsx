@@ -1,56 +1,54 @@
 'use client'
 
 import { DollarSign, Calendar, TrendingDown, AlertCircle } from 'lucide-react'
+import { money, pct, sf } from '@/lib/format'
 import { DealAnalysis } from '@/lib/types'
 
-interface MetricsGridProps {
-  deal: DealAnalysis
-}
-
-export function MetricsGrid({ deal }: MetricsGridProps) {
+export function MetricsGrid({ deal }: { deal: DealAnalysis }) {
+  const fin = deal.financialSummary
   const metrics = [
     {
       label: 'Annual NOI',
-      value: `$${deal.financialSummary.noi.toLocaleString()}`,
+      value: money(fin.noi),
       icon: DollarSign,
-      subtext: `${deal.financialSummary.capRate}% cap rate`,
+      subtext: fin.noi === null ? 'Not stated in these documents' : fin.capRate !== null ? `${fin.capRate}% cap rate` : fin.noiBasis,
+      alert: false,
     },
     {
       label: 'WALT',
-      value: `${deal.walt} mo`,
+      value: deal.walt === null ? '—' : `${Math.round(deal.walt)} mo`,
       icon: Calendar,
-      subtext: 'Weighted avg lease term',
+      subtext: deal.walt === null ? 'No expiration dates on file' : `Rent-weighted · ${Math.round(deal.waltCoverage)}% of rent dated`,
+      alert: deal.walt !== null && deal.waltCoverage < 90,
     },
     {
       label: 'Vacancy',
-      value: `${deal.financialSummary.vacancy}%`,
+      value: pct(fin.vacancy),
       icon: TrendingDown,
-      subtext: `${Math.round(deal.rsfReconciliation.bomaTotalSF * (deal.financialSummary.vacancy / 100)).toLocaleString()} SF`,
-      alert: deal.financialSummary.vacancy > 10,
+      subtext: fin.vacancy === null ? 'Building area unknown' : `${sf(deal.vacantRsf)} SF vacant`,
+      alert: (fin.vacancy ?? 0) > 10,
     },
     {
-      label: 'AR Delinquency',
-      value: `$${deal.financialSummary.arDelinquency.toLocaleString()}`,
+      label: 'AR 60+ Days',
+      value: money(fin.arDelinquency),
       icon: AlertCircle,
-      subtext: '60+ days past due',
-      alert: deal.financialSummary.arDelinquency > 0,
+      subtext: fin.arDelinquency > 0 ? `${pct((fin.arDelinquency / (fin.totalAnnualRent || 1)) * 100)} of annual rent` : 'No aged receivables reported',
+      alert: fin.arDelinquency > 0,
     },
   ]
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {metrics.map((metric) => {
-        const Icon = metric.icon
+      {metrics.map((m) => {
+        const Icon = m.icon
         return (
-          <div key={metric.label} className="rounded-lg border border-border bg-card p-4">
+          <div key={m.label} className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{metric.label}</span>
-              <Icon
-                className={`h-4 w-4 ${metric.alert ? 'text-warning' : 'text-muted-foreground'}`}
-              />
+              <span className="text-sm text-muted-foreground">{m.label}</span>
+              <Icon className={`h-4 w-4 ${m.alert ? 'text-warning' : 'text-muted-foreground'}`} />
             </div>
-            <div className="mt-2 text-2xl font-semibold tabular-nums">{metric.value}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{metric.subtext}</div>
+            <div className="mt-2 text-2xl font-semibold tabular-nums">{m.value}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{m.subtext}</div>
           </div>
         )
       })}

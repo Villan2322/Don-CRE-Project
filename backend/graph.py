@@ -1,254 +1,173 @@
-import os
+"""
+CRE deal analysis pipeline (LangGraph).
+
+  ingest_documents      parse text; OCR scans and images with Claude
+  classify_documents    classify every document concurrently
+  extract_document ×N   extract each document against its schema (fan-out)
+  compute_metrics       tenant roster, RSF, WALT, AR, arithmetic checks — in code
+  synthesize            Claude's qualitative review: lease risks, summary, requests
+  build_report          score + red flags + dashboard payload — in code
+
+Run it with `await graph.ainvoke(state)`; the nodes are async.
+"""
+
 import asyncio
-from datetime import datetime, timezone
+import logging
+import os
+from datetime import date, datetime, timezone
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
-
-# Enable LangSmith tracing - API key must be set in environment as LANGSMITH_API_KEY
-os.environ.setdefault("LANGSMITH_TRACING", "true")
-os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-os.environ.setdefault("LANGSMITH_PROJECT", "CRE Don Project")
-
-# Log tracing status on module load
-_langsmith_key = os.environ.get("LANGSMITH_API_KEY", "")
-print(f"[LangSmith] Tracing enabled: {os.environ.get('LANGSMITH_TRACING')}")
-print(f"[LangSmith] Project: {os.environ.get('LANGSMITH_PROJECT')}")
-print(f"[LangSmith] API Key configured: {'Yes' if _langsmith_key else 'No'}")
 
 from state import CREPipelineState, SingleDocumentState
 from agents.document_parsing import DocumentParsingAgent
 from agents.ocr_agent import OCRAgent
 from agents.universal_extractor import UniversalExtractor
-from agents.synthesis import SynthesisAgent, ArithmeticVerificationAgent
-from agents.document_classifier import DocumentClassifierAgent
-from agents.rsf_reconciliation import RSFReconciliationAgent
-from agents.red_flag_detection import RedFlagDetectionAgent
-from agents.risk_scoring import RiskScoringAgent
+from agents.synthesis import SynthesisAgent
+from services.deal_metrics import compute_metrics as _compute_metrics, build_report as _build_report, public_metrics
 
-_parsing_agent = DocumentParsingAgent()
-_ocr_agent = OCRAgent()
+log = logging.getLogger("cre.pipeline")
+
+# LangSmith tracing only when a key is configured; otherwise it just logs auth errors.
+if os.environ.get("LANGSMITH_API_KEY"):
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
+    os.environ.setdefault("LANGSMITH_PROJECT", "CRE Don Project")
+else:
+    os.environ["LANGSMITH_TRACING"] = "false"
+
+MAX_TEXT_CHARS = 150_000
+
+_parser = DocumentParsingAgent()
+_ocr = OCRAgent()
 _extractor = UniversalExtractor()
 _synthesizer = SynthesisAgent()
-_arithmetic = ArithmeticVerificationAgent()
-_classifier = DocumentClassifierAgent()
-_rsf_agent = RSFReconciliationAgent()
-_red_flag_agent = RedFlagDetectionAgent()
-_risk_agent = RiskScoringAgent()
 
 
 async def ingest_documents(state: CREPipelineState) -> dict:
-    raw_documents = []
-    errors = []
-    for filename, file_bytes in state["raw_files"].items():
+    async def ingest_one(index: int, filename: str, file_bytes: bytes):
         content_type = state["file_content_types"].get(filename, "application/octet-stream")
-        doc_id = f"doc-{filename.replace(' ', '_')}-{id(file_bytes)}"
-        try:
-            parse_result = _parsing_agent.check(filename=filename, file_content=file_bytes, content_type=content_type)
-            if not parse_result.is_parseable:
-                errors.append(f"{filename}: {parse_result.reason}")
-                continue
-            extracted_text = ""
-            ocr_performed = False
-            ocr_confidence = None
-            if parse_result.needs_ocr:
-                ocr_result = await _ocr_agent.process(file_content=file_bytes, filename=filename, page_count=parse_result.page_count)
-                ocr_performed = True
-                ocr_confidence = ocr_result.get("confidence")
-                if not ocr_result.get("document_readable", False):
-                    errors.append(f"{filename}: OCR failed — {', '.join(ocr_result.get('ocr_issues_found', []))}")
-                    continue
-                extracted_text = ocr_result.get("cleaned_text", "")
-            else:
-                extracted_text = parse_result.extracted_text
-            raw_documents.append({
-                "doc_id": doc_id, "deal_name": state["deal_name"],
-                "filename": filename, "content_type": content_type,
-                "file_type": parse_result.file_type,
-                "extracted_text": extracted_text[:50000],
-                "page_count": parse_result.page_count,
-                "needs_ocr": parse_result.needs_ocr,
-                "ocr_performed": ocr_performed, "ocr_confidence": ocr_confidence,
-                "is_parseable": True, "parse_method": parse_result.method,
-                "parse_reason": parse_result.reason,
-            })
-        except Exception as e:
-            errors.append(f"{filename}: {str(e)}")
-    return {"raw_documents": raw_documents, "ingest_errors": errors, "pipeline_stage": "ingested"}
+        parsed = _parser.check(filename=filename, file_content=file_bytes, content_type=content_type)
+        if not parsed.is_parseable:
+            return None, f"{filename}: {parsed.reason}"
+        text, ocr_note = parsed.extracted_text, None
+        if parsed.needs_ocr:
+            ocr = await _ocr.process(file_content=file_bytes, filename=filename, page_count=parsed.page_count)
+            if not ocr["document_readable"]:
+                return None, f"{filename}: OCR failed — {'; '.join(ocr['ocr_issues_found'])}"
+            text = ocr["cleaned_text"]
+            ocr_note = "; ".join(ocr["ocr_issues_found"]) or None
+        return {
+            "doc_id": f"doc-{index + 1}", "deal_name": state["deal_name"], "filename": filename,
+            "content_type": content_type, "file_type": parsed.file_type,
+            "extracted_text": text[:MAX_TEXT_CHARS], "page_count": parsed.page_count,
+            "ocr_performed": parsed.needs_ocr, "ocr_note": ocr_note, "parse_method": parsed.method,
+        }, None
+
+    results = await asyncio.gather(
+        *[ingest_one(i, name, data) for i, (name, data) in enumerate(state["raw_files"].items())],
+        return_exceptions=True,
+    )
+    docs, errors = [], []
+    for (name, _), result in zip(state["raw_files"].items(), results):
+        if isinstance(result, Exception):
+            errors.append(f"{name}: {result}")
+            continue
+        doc, err = result
+        if doc:
+            docs.append(doc)
+        if err:
+            errors.append(err)
+    return {"raw_documents": docs, "ingest_errors": errors, "pipeline_stage": "ingested"}
 
 
 async def classify_documents(state: CREPipelineState) -> dict:
-    classified = []
-    errors = []
-
     async def classify_one(doc):
         try:
             result = await _extractor.classify_document(
-                text=doc["extracted_text"], filename=doc["filename"],
-                mime_type=doc.get("content_type"))
+                text=doc["extracted_text"], filename=doc["filename"], mime_type=doc.get("content_type"))
             return {**doc, "doc_type": result["doc_type"],
                     "classification_confidence": result["confidence"],
-                    "classification_reasoning": result.get("reasoning", "")}
+                    "classification_reasoning": result["reasoning"]}, None
         except Exception as e:
-            errors.append(f"{doc['filename']}: {str(e)}")
-            return {**doc, "doc_type": "UNKNOWN", "classification_confidence": 0.0,
-                    "classification_reasoning": str(e)}
+            return ({**doc, "doc_type": "OTHER", "classification_confidence": 0.0,
+                     "classification_reasoning": str(e)}, f"{doc['filename']}: classification failed — {e}")
 
-    results = await asyncio.gather(*[classify_one(doc) for doc in state["raw_documents"]])
-    return {"classified_documents": list(results), "classification_errors": errors,
+    results = await asyncio.gather(*[classify_one(d) for d in state["raw_documents"]])
+    return {"classified_documents": [d for d, _ in results],
+            "pipeline_errors": [e for _, e in results if e],
             "pipeline_stage": "classified"}
 
 
-def fan_out_extractions(state: CREPipelineState) -> list[Send]:
-    return [
-        Send("extract_single_document", SingleDocumentState(
-            doc_id=doc["doc_id"], deal_name=doc["deal_name"],
-            filename=doc["filename"], doc_type=doc["doc_type"],
-            extracted_text=doc["extracted_text"],
-            ocr_performed=doc["ocr_performed"],
-            classification_confidence=doc["classification_confidence"],
-        ))
-        for doc in state["classified_documents"]
-        if doc["doc_type"] != "UNKNOWN"
+def fan_out_extractions(state: CREPipelineState):
+    sends = [
+        Send("extract_document", SingleDocumentState(
+            doc_id=d["doc_id"], deal_name=d["deal_name"], filename=d["filename"],
+            doc_type=d["doc_type"], extracted_text=d["extracted_text"]))
+        for d in state["classified_documents"] if d["doc_type"] != "OTHER"
     ]
+    return sends or ["compute_metrics"]
 
 
-async def extract_single_document(state: SingleDocumentState) -> dict:
+async def extract_document(state: SingleDocumentState) -> dict:
     try:
         result = await _extractor.extract_document(
-            text=state["extracted_text"], doc_type=state["doc_type"],
-            doc_id=state["doc_id"], deal_name=state["deal_name"],
-            filename=state["filename"])
-        extraction = result.get("extraction", {})
-        enriched = extraction.pop("_enriched", None)
-        missing = extraction.pop("_missing_fields", [])
-        abstract_complete = extraction.pop("_abstract_complete", True)
-        return {
-            "extractions": [{
-                "doc_id": state["doc_id"], "deal_name": state["deal_name"],
-                "filename": state["filename"], "doc_type": state["doc_type"],
-                "extraction": extraction, "parse_error": result.get("parse_error"),
-                "pipeline_stage": result.get("pipeline_stage", "extracted"),
-                "extraction_timestamp": result.get("extraction_timestamp", datetime.now(timezone.utc).isoformat()),
-                "enriched": enriched, "missing_fields": missing,
-                "abstract_complete": abstract_complete,
-            }],
-            "extraction_errors": ([f"{state['filename']}: {result['parse_error']}"]
-                                   if result.get("parse_error") else []),
-        }
+            text=state["extracted_text"], doc_type=state["doc_type"], doc_id=state["doc_id"],
+            deal_name=state["deal_name"], filename=state["filename"])
     except Exception as e:
-        return {
-            "extractions": [{"doc_id": state["doc_id"], "deal_name": state["deal_name"],
-                              "filename": state["filename"], "doc_type": state["doc_type"],
-                              "extraction": {}, "parse_error": str(e),
-                              "pipeline_stage": "extraction_failed",
-                              "extraction_timestamp": datetime.now(timezone.utc).isoformat(),
-                              "enriched": None, "missing_fields": [], "abstract_complete": False}],
-            "extraction_errors": [f"{state['filename']}: {str(e)}"],
-        }
+        result = {"doc_id": state["doc_id"], "doc_type": state["doc_type"], "filename": state["filename"],
+                  "deal_name": state["deal_name"], "extraction": {}, "parse_error": str(e),
+                  "pipeline_stage": "extraction_failed"}
+    errors = [f"{state['filename']}: {result['parse_error']}"] if result.get("parse_error") else []
+    return {"extractions": [result], "pipeline_errors": errors}
+
+
+def compute_metrics(state: CREPipelineState) -> dict:
+    as_of = date.fromisoformat(state["as_of"]) if state.get("as_of") else None
+    return {"metrics": _compute_metrics(state["extractions"], as_of=as_of), "pipeline_stage": "measured"}
 
 
 async def synthesize(state: CREPipelineState) -> dict:
+    if not state["extractions"]:
+        return {"synthesis": {}, "pipeline_stage": "synthesis_skipped"}
     try:
         result = await _synthesizer.synthesize_deal(
-            extractions=state["extractions"], deal_name=state["deal_name"])
-        if result.get("_parse_error"):
-            return {"synthesis": {}, "rsf_recovery": {}, "score_summary": {},
-                    "synthesis_error": result["_parse_error"],
-                    "pipeline_stage": "synthesis_failed",
-                    "pipeline_errors": [f"Synthesis error: {result['_parse_error']}"]}
-        return {"synthesis": result["synthesis"], "rsf_recovery": result.get("rsf_recovery", {}),
-                "score_summary": result.get("score_summary", {}),
-                "synthesis_error": None, "pipeline_stage": "synthesized"}
+            extractions=state["extractions"], metrics=public_metrics(state["metrics"]),
+            deal_name=state["deal_name"])
+        return {"synthesis": result, "pipeline_stage": "synthesized"}
     except Exception as e:
-        return {"synthesis": {}, "rsf_recovery": {}, "score_summary": {},
-                "synthesis_error": str(e), "pipeline_stage": "synthesis_failed",
-                "pipeline_errors": [f"Synthesis failed: {str(e)}"]}
+        log.exception("synthesis failed")
+        # The computed report still stands without the qualitative review.
+        return {"synthesis": {}, "pipeline_stage": "synthesis_failed",
+                "pipeline_errors": [f"AI review unavailable: {e}"]}
 
 
-def verify_arithmetic(state: CREPipelineState) -> dict:
-    by_type: dict = {}
-    for ext in state["extractions"]:
-        t = ext["doc_type"]
-        if t not in by_type:
-            by_type[t] = []
-        by_type[t].append(ext)
-    verification = _arithmetic.verify_arithmetic(
-        synthesis=state.get("synthesis", {}), extractions=by_type)
-    return {"arithmetic_verification": verification, "pipeline_stage": "verified"}
+def build_report(state: CREPipelineState) -> dict:
+    completed_at = datetime.now(timezone.utc).isoformat()
+    report = _build_report(
+        deal_id=state["deal_id"], deal_name=state["deal_name"],
+        classified_documents=state["classified_documents"], extractions=state["extractions"],
+        ingest_errors=state["ingest_errors"], metrics=state["metrics"], synthesis=state.get("synthesis"),
+        pipeline_errors=state["pipeline_errors"], files_uploaded=len(state["raw_files"]),
+        completed_at=completed_at)
+    return {"report": report, "completed_at": completed_at, "pipeline_stage": "completed"}
 
 
-async def enrich_with_gen1_agents(state: CREPipelineState) -> dict:
-    by_type: dict = {}
-    for ext in state["extractions"]:
-        t = ext["doc_type"]
-        if t not in by_type:
-            by_type[t] = []
-        by_type[t].append(ext)
-
-    lease_abstracts = [e["extraction"] for e in by_type.get("LEASE", []) if e.get("extraction")]
-    rent_roll_data = by_type["RENT_ROLL"][0].get("extraction", {}) if "RENT_ROLL" in by_type and by_type["RENT_ROLL"] else {}
-    boma_data = {"data": by_type["BOMA"][0].get("extraction", {})} if "BOMA" in by_type and by_type["BOMA"] else None
-    doc_list = [{"type": d["doc_type"], "filename": d["filename"]} for d in state["classified_documents"]]
-
-    rsf_result, red_flag_result, completeness_result = await asyncio.gather(
-        _rsf_agent.reconcile(rent_roll_data=rent_roll_data, lease_data=lease_abstracts, boma_data=boma_data),
-        _red_flag_agent.detect_flags(rent_roll_analysis=rent_roll_data, lease_abstracts=lease_abstracts, rsf_reconciliation={}),
-        _classifier.assess_completeness(doc_list),
-        return_exceptions=True,
-    )
-
-    def safe(r, fallback=None):
-        return fallback if isinstance(r, Exception) else r
-
-    rsf_rec = safe(rsf_result, {})
-    red_flags = safe(red_flag_result, {"red_flags": []})
-    completeness = safe(completeness_result, {})
-
-    try:
-        deal_score = await _risk_agent.score_deal(
-            documents_status=completeness, rsf_reconciliation=rsf_rec,
-            lease_abstracts=lease_abstracts, rent_roll_analysis=rent_roll_data,
-            red_flags=red_flags.get("red_flags", []))
-    except Exception as e:
-        deal_score = {"error": str(e)}
-
-    errors = [f"{k} failed: {v}" for k, v in {
-        "RSF": rsf_result, "RedFlags": red_flag_result, "Completeness": completeness_result
-    }.items() if isinstance(v, Exception)]
-
-    return {"rsf_reconciliation": rsf_rec, "red_flags_result": red_flags,
-            "deal_score_result": deal_score, "completeness_result": completeness,
-            "pipeline_stage": "enriched", "pipeline_errors": errors,
-            "completed_at": datetime.now(timezone.utc).isoformat()}
-
-
-def should_enrich(state: CREPipelineState) -> str:
-    return "skip" if (state.get("synthesis_error") and not state.get("synthesis")) else "enrich"
-
-
-def skip_enrichment(state: CREPipelineState) -> dict:
-    return {"pipeline_stage": "completed_with_errors",
-            "completed_at": datetime.now(timezone.utc).isoformat()}
-
-
-def build_graph() -> StateGraph:
+def build_graph():
     builder = StateGraph(CREPipelineState)
     builder.add_node("ingest_documents", ingest_documents)
     builder.add_node("classify_documents", classify_documents)
-    builder.add_node("extract_single_document", extract_single_document)
+    builder.add_node("extract_document", extract_document)
+    builder.add_node("compute_metrics", compute_metrics)
     builder.add_node("synthesize", synthesize)
-    builder.add_node("verify_arithmetic", verify_arithmetic)
-    builder.add_node("enrich_with_gen1_agents", enrich_with_gen1_agents)
-    builder.add_node("skip_enrichment", skip_enrichment)
+    builder.add_node("build_report", build_report)
     builder.add_edge(START, "ingest_documents")
     builder.add_edge("ingest_documents", "classify_documents")
-    builder.add_conditional_edges("classify_documents", fan_out_extractions)
-    builder.add_edge("extract_single_document", "synthesize")
-    builder.add_edge("synthesize", "verify_arithmetic")
-    builder.add_conditional_edges("verify_arithmetic", should_enrich,
-                                   {"enrich": "enrich_with_gen1_agents", "skip": "skip_enrichment"})
-    builder.add_edge("enrich_with_gen1_agents", END)
-    builder.add_edge("skip_enrichment", END)
+    builder.add_conditional_edges("classify_documents", fan_out_extractions,
+                                  ["extract_document", "compute_metrics"])
+    builder.add_edge("extract_document", "compute_metrics")
+    builder.add_edge("compute_metrics", "synthesize")
+    builder.add_edge("synthesize", "build_report")
+    builder.add_edge("build_report", END)
     return builder.compile()
 
 

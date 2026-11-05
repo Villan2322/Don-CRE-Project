@@ -9,13 +9,14 @@ import {
   Shield,
   FileStack,
   Upload,
-  Clock,
 } from 'lucide-react'
-import { TabId } from '@/lib/types'
+import { timestamp } from '@/lib/format'
+import { DealAnalysis, TabId } from '@/lib/types'
 
 interface SidebarProps {
   activeTab: TabId
   onTabChange: (tab: TabId) => void
+  deal: DealAnalysis
 }
 
 const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
@@ -25,15 +26,13 @@ const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'lease-audit', label: 'Lease Audit', icon: FileText },
   { id: 'risk', label: 'Risk Dashboard', icon: Shield },
   { id: 'abstracts', label: 'Lease Abstracts', icon: FileStack },
+  { id: 'upload', label: 'Upload Documents', icon: Upload },
 ]
 
-export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
   return (
-    <aside className="flex w-56 flex-col border-r border-border bg-sidebar">
+    <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
       <nav className="flex-1 p-3">
-        <div className="mb-2 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Analysis
-        </div>
         <ul className="space-y-0.5">
           {navItems.map((item) => {
             const Icon = item.icon
@@ -43,6 +42,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                   onClick={() => onTabChange(item.id)}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    item.id === 'upload' && 'mt-4',
                     activeTab === item.id
                       ? 'bg-sidebar-accent text-sidebar-foreground'
                       : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
@@ -55,39 +55,31 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             )
           })}
         </ul>
-        <div className="mb-2 mt-6 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Actions
-        </div>
-        <ul className="space-y-0.5">
-          <li>
-            <button
-              onClick={() => onTabChange('upload')}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                activeTab === 'upload'
-                  ? 'bg-sidebar-accent text-sidebar-foreground'
-                  : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-              )}
-            >
-              <Upload className="h-4 w-4" />
-              Upload Documents
-            </button>
-          </li>
-          <li>
-            <button className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground">
-              <Clock className="h-4 w-4" />
-              History
-            </button>
-          </li>
-        </ul>
       </nav>
-      <div className="border-t border-sidebar-border p-4">
-        <div className="text-xs text-muted-foreground">
-          Last updated
-          <br />
-          <span className="text-sidebar-foreground">April 18, 2026 2:32 PM</span>
-        </div>
+      <div className="border-t border-sidebar-border p-4 text-xs text-muted-foreground">
+        {deal.isSample ? 'Sample analysis' : 'Analyzed'}
+        <br />
+        <span className="text-sidebar-foreground">{timestamp(deal.submittedAt)}</span>
       </div>
     </aside>
+  )
+}
+
+export function MobileTabs({ activeTab, onTabChange }: Omit<SidebarProps, 'deal'>) {
+  return (
+    <div className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-border px-4 pb-2 md:hidden">
+      {navItems.map((item) => (
+        <button
+          key={item.id}
+          onClick={() => onTabChange(item.id)}
+          className={cn(
+            'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium',
+            activeTab === item.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   )
 }

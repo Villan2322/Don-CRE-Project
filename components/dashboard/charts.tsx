@@ -13,163 +13,158 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts'
-import { scoreHistory, incomeConcentration, waltTimeline } from '@/lib/mock-data'
+import { ScorePoint } from '@/lib/deal-history'
+import { money } from '@/lib/format'
+import { ExpiryBucket, Tenant } from '@/lib/types'
 
-export function ScoreHistoryChart() {
+const GRID = 'var(--border)'
+const AXIS = { fill: 'var(--muted-foreground)', fontSize: 11 }
+const TOOLTIP = {
+  backgroundColor: 'var(--popover)',
+  border: '1px solid var(--border)',
+  borderRadius: '6px',
+  color: 'var(--popover-foreground)',
+  fontSize: 12,
+}
+const SLICES = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--muted-foreground)']
+
+function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
-        <h3 className="font-semibold">Score History</h3>
-        <p className="text-xs text-muted-foreground">Score progression as documents are added</p>
+        <h3 className="font-semibold">{title}</h3>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
-      <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={scoreHistory}>
-            <defs>
-              <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="oklch(0.60 0.18 250)" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="oklch(0.60 0.18 250)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.26 0 0)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: 'oklch(0.60 0 0)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(value) => {
-                const date = new Date(value)
-                return `${date.getMonth() + 1}/${date.getDate()}`
-              }}
-            />
-            <YAxis
-              domain={[0, 100]}
-              tick={{ fill: 'oklch(0.60 0 0)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              width={30}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'oklch(0.16 0.005 280)',
-                border: '1px solid oklch(0.26 0 0)',
-                borderRadius: '6px',
-                color: 'oklch(0.95 0 0)',
-              }}
-              labelFormatter={(value) => {
-                const date = new Date(value)
-                return date.toLocaleDateString()
-              }}
-              formatter={(value: number, name: string) => {
-                if (name === 'score') return [value, 'Score']
-                return [value, 'Documents']
-              }}
-            />
-            <Area
-              type="monotone"
-              dataKey="score"
-              stroke="oklch(0.60 0.18 250)"
-              strokeWidth={2}
-              fillOpacity={1}
-              fill="url(#scoreGradient)"
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {children}
     </div>
   )
 }
 
-export function IncomeConcentrationChart() {
+function Empty({ text }: { text: string }) {
+  return <div className="flex h-48 items-center justify-center text-center text-sm text-muted-foreground">{text}</div>
+}
+
+export function ScoreHistoryChart({ points }: { points: ScorePoint[] }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="mb-4">
-        <h3 className="font-semibold">Income Concentration</h3>
-        <p className="text-xs text-muted-foreground">Revenue distribution by tenant</p>
-      </div>
-      <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={incomeConcentration}
-              cx="50%"
-              cy="50%"
-              innerRadius={50}
-              outerRadius={70}
-              paddingAngle={2}
-              dataKey="value"
-            >
-              {incomeConcentration.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.fill} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'oklch(0.16 0.005 280)',
-                border: '1px solid oklch(0.26 0 0)',
-                borderRadius: '6px',
-                color: 'oklch(0.95 0 0)',
-              }}
-              formatter={(value: number) => [`${value}%`, 'Share']}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-        {incomeConcentration.slice(0, 4).map((entry, index) => (
-          <div key={index} className="flex items-center gap-1.5 text-xs">
-            <div className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.fill }} />
-            <span className="text-muted-foreground">{entry.name}</span>
-            <span className="font-medium">{entry.value}%</span>
+    <Panel title="Score History" subtitle="Each run of this deal name in this browser">
+      {points.length < 2 ? (
+        <Empty text="Re-run this deal with more documents to see the score move." />
+      ) : (
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={points}>
+              <defs>
+                <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+              <XAxis
+                dataKey="date"
+                tick={AXIS}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => {
+                  const d = new Date(v)
+                  return `${d.getMonth() + 1}/${d.getDate()}`
+                }}
+              />
+              <YAxis domain={[0, 100]} tick={AXIS} axisLine={false} tickLine={false} width={30} />
+              <Tooltip
+                contentStyle={TOOLTIP}
+                labelFormatter={(v) => new Date(v).toLocaleString()}
+                formatter={(value: number, _name, item) => [`${value} (${item.payload.documents} docs)`, 'Score']}
+              />
+              <Area type="monotone" dataKey="score" stroke="var(--chart-1)" strokeWidth={2} fill="url(#scoreGradient)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+export function IncomeConcentrationChart({ tenants }: { tenants: Tenant[] }) {
+  const sorted = [...tenants].filter((t) => t.annualRent > 0).sort((a, b) => b.annualRent - a.annualRent)
+  const top = sorted.slice(0, 5).map((t) => ({ name: t.name, value: t.incomeConcentration }))
+  const rest = sorted.slice(5).reduce((sum, t) => sum + t.incomeConcentration, 0)
+  const data = rest > 0 ? [...top, { name: `${sorted.length - 5} other${sorted.length - 5 === 1 ? '' : 's'}`, value: Math.round(rest * 10) / 10 }] : top
+
+  return (
+    <Panel title="Income Concentration" subtitle="Share of annual base rent by tenant">
+      {data.length === 0 ? (
+        <Empty text="No rent data in this package." />
+      ) : (
+        <>
+          <div className="h-40">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={data} cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={2} dataKey="value">
+                  {data.map((_, i) => (
+                    <Cell key={i} fill={SLICES[i % SLICES.length]} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={TOOLTIP} formatter={(v: number) => [`${v}%`, 'Share']} />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="mt-2 space-y-1">
+            {data.map((d, i) => (
+              <div key={d.name} className="flex items-center gap-2 text-xs">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: SLICES[i % SLICES.length] }} />
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{d.name}</span>
+                <span className="font-medium tabular-nums">{d.value}%</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Panel>
   )
 }
 
-export function WALTTimelineChart() {
+export function ExpiryScheduleChart({ schedule }: { schedule: ExpiryBucket[] }) {
+  const data = schedule.filter((b) => b.annualRent > 0 || /^\d{4}$/.test(b.label))
+  const hasRent = schedule.some((b) => b.annualRent > 0)
+  const color = (label: string) =>
+    label === 'Expired' || label === 'Unknown' ? 'var(--destructive)' : 'var(--chart-1)'
+
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="mb-4">
-        <h3 className="font-semibold">Lease Expiry Timeline</h3>
-        <p className="text-xs text-muted-foreground">Income at risk over time</p>
-      </div>
-      <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={waltTimeline} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.26 0 0)" horizontal={false} />
-            <XAxis
-              type="number"
-              tick={{ fill: 'oklch(0.60 0 0)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-            />
-            <YAxis
-              type="category"
-              dataKey="month"
-              tick={{ fill: 'oklch(0.60 0 0)', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              width={50}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'oklch(0.16 0.005 280)',
-                border: '1px solid oklch(0.26 0 0)',
-                borderRadius: '6px',
-                color: 'oklch(0.95 0 0)',
-              }}
-              formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
-            />
-            <Bar dataKey="atRisk" stackId="a" fill="oklch(0.55 0.22 25)" name="At Risk" />
-            <Bar dataKey="secure" stackId="a" fill="oklch(0.65 0.18 145)" name="Secure" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <Panel title="Lease Expiry Schedule" subtitle="Annual base rent rolling each year">
+      {!hasRent ? (
+        <Empty text="No lease terms in this package." />
+      ) : (
+        <div className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
+              <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} interval={0} />
+              <YAxis
+                tick={AXIS}
+                axisLine={false}
+                tickLine={false}
+                width={44}
+                tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+              />
+              <Tooltip
+                contentStyle={TOOLTIP}
+                cursor={{ fill: 'var(--muted)', opacity: 0.4 }}
+                formatter={(v: number, _n, item) => [
+                  `${money(v)} — ${item.payload.tenants.join(', ') || 'none'}`,
+                  'Rent rolling',
+                ]}
+              />
+              <Bar dataKey="annualRent" radius={[3, 3, 0, 0]}>
+                {data.map((b) => (
+                  <Cell key={b.label} fill={color(b.label)} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
   )
 }
