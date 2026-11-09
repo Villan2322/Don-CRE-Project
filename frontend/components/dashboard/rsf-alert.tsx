@@ -9,32 +9,32 @@ export function RSFAlert({ rsf }: { rsf: DealAnalysis['rsfReconciliation'] }) {
   const over = rsf.deltaSF > 0
 
   return (
-    <div className="rounded-lg border border-warning/30 bg-warning/5 p-6">
+    <div className="rounded-lg border border-border border-l-4 border-l-gold bg-card p-6 shadow-sm">
       <div className="flex items-start gap-4">
-        <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-warning/20 sm:flex">
-          <AlertTriangle className="h-5 w-5 text-warning" />
+        <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft sm:flex">
+          <AlertTriangle className="h-5 w-5 text-brand-navy" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-semibold text-warning">RSF Recovery Alert</h3>
+          <h3 className="text-lg font-bold text-foreground">RSF Recovery Alert</h3>
           <p className="mt-1 text-sm text-muted-foreground">
             BOMA total is {Math.abs(rsf.deltaPercent).toFixed(1)}% {over ? 'above' : 'below'} the area on the{' '}
             {rsf.occupiedSource ?? 'rent roll'}.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto_1fr]">
-            <div className="rounded-md bg-card p-3">
+            <div className="rounded-md bg-muted p-3">
               <div className="text-xs text-muted-foreground">BOMA total</div>
               <div className="mt-1 text-xl font-semibold tabular-nums">{sf(rsf.bomaTotalSF)} SF</div>
             </div>
             <div className="hidden items-center justify-center sm:flex">
               <ArrowRight className="h-5 w-5 text-muted-foreground" />
             </div>
-            <div className="rounded-md bg-card p-3">
+            <div className="rounded-md bg-muted p-3">
               <div className="text-xs text-muted-foreground">Billed ({rsf.occupiedSource ?? 'rent roll'})</div>
               <div className="mt-1 text-xl font-semibold tabular-nums">{sf(rsf.rentRollOccupiedSF)} SF</div>
             </div>
           </div>
           {over && rsf.estimatedAnnualRecovery > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md bg-success/10 p-4">
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-success/20 bg-success-soft p-4">
               <TrendingUp className="h-5 w-5 text-success" />
               <div>
                 <div className="text-sm font-medium text-success">Estimated annual recovery</div>

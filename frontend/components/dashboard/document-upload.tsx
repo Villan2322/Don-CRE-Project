@@ -149,7 +149,7 @@ export function DocumentUpload({ onAnalysisComplete, baseDeal, mode = 'new', onM
       </div>
 
       {mode === 'add' && !addable && baseDeal && !baseDeal.isSample && (
-        <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+        <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft p-3 text-sm">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           {baseDeal.dealName} was analyzed before documents could be added to a deal. Upload the full package once;
           after that you can add documents to it.
@@ -329,7 +329,7 @@ export function DocumentUpload({ onAnalysisComplete, baseDeal, mode = 'new', onM
               </Button>
             </div>
             {error && (
-              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive-soft p-3 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -338,7 +338,7 @@ export function DocumentUpload({ onAnalysisComplete, baseDeal, mode = 'new', onM
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">What to include</CardTitle>

@@ -42,7 +42,7 @@ export function MetricsGrid({ deal }: { deal: DealAnalysis }) {
       {metrics.map((m) => {
         const Icon = m.icon
         return (
-          <div key={m.label} className="rounded-lg border border-border bg-card p-4">
+          <div key={m.label} className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">{m.label}</span>
               <Icon className={`h-4 w-4 ${m.alert ? 'text-warning' : 'text-muted-foreground'}`} />

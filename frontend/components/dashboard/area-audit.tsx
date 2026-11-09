@@ -8,11 +8,11 @@ import { DealAnalysis, LeaseAuditRow, LeverageCall } from '@/lib/types'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 const LEVERAGE: Record<LeverageCall, { label: string; style: string }> = {
-  STRONG: { label: 'Can remeasure', style: 'bg-success/15 text-success border-success/30' },
-  NEGOTIABLE: { label: 'Negotiable', style: 'bg-warning/15 text-warning border-warning/30' },
+  STRONG: { label: 'Can remeasure', style: 'bg-success-soft text-success border-success/30' },
+  NEGOTIABLE: { label: 'Negotiable', style: 'bg-warning-soft text-warning border-warning/30' },
   NONE: { label: 'Locked', style: 'bg-muted text-muted-foreground border-border' },
   NO_LEASE: { label: 'Need lease', style: 'bg-primary/10 text-primary border-primary/30' },
-  OVERBILLED: { label: 'Overbilled', style: 'bg-destructive/15 text-destructive border-destructive/30' },
+  OVERBILLED: { label: 'Overbilled', style: 'bg-destructive-soft text-destructive border-destructive/30' },
   MATCHES: { label: 'Matches', style: 'bg-muted text-muted-foreground border-border' },
 }
 
@@ -45,7 +45,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
     return (
       <div>
         {header}
-        <div className="rounded-lg border border-border bg-card p-8 text-center">
+        <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-8 text-center">
           <Ruler className="mx-auto h-8 w-8 text-muted-foreground" />
           <p className="mt-3 font-medium">This package can&apos;t be audited yet</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
@@ -105,7 +105,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
       </div>
 
       {s.suitesOverbilled > 0 && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+        <div className="rounded-lg border border-destructive/30 bg-destructive-soft px-4 py-3 text-sm">
           <span className="font-medium text-destructive">{s.suitesOverbilled} tenant(s) billed on more area than measured</span>
           <span className="text-muted-foreground">
             {' '}
@@ -115,14 +115,74 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold">By suite</h3>
           <p className="text-xs text-muted-foreground">
-            {s.suitesMeasured} suites measured · biggest gaps first · tap a row for the lease terms
+            {s.suitesMeasured} suites measured · biggest gaps first · tap a suite for its lease terms
           </p>
         </div>
-        <div className="overflow-x-auto">
+        {/* Phones and iPads in portrait: one card per suite, dollars up front. */}
+        <ul className="divide-y divide-border lg:hidden">
+          {rows.map((r) => {
+            const isOpen = open === r.tenantId
+            return (
+              <li key={r.tenantId}>
+                <button
+                  className="w-full p-4 text-left"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpen(isOpen ? null : r.tenantId)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium">{r.name}</p>
+                      <p className="text-xs text-muted-foreground">{r.suite || 'Suite not listed'}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-lg font-semibold tabular-nums">{gap(r.totalGap)}</p>
+                      <p className="text-xs text-muted-foreground">per year</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Billed → BOMA</p>
+                      <p className="tabular-nums">
+                        {sf(r.billedRsf)} → {sf(r.bomaRsf)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Base rent</p>
+                      <p className="tabular-nums">{gap(r.baseRentGap)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">CAM</p>
+                      <p className="tabular-nums">{gap(r.camGap)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    {r.leverage.call ? (
+                      <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', LEVERAGE[r.leverage.call].style)}>
+                        {LEVERAGE[r.leverage.call].label}
+                      </span>
+                    ) : (
+                      <span />
+                    )}
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      {isOpen ? 'Hide' : 'Lease terms'}
+                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-5">
+                    <Detail row={r} />
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto lg:block">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -258,7 +318,7 @@ function Detail({ row }: { row: LeaseAuditRow }) {
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className={cn('mt-1 text-2xl font-semibold tabular-nums', tone === 'good' && 'text-success', tone === 'warn' && 'text-warning')}>
         {value}

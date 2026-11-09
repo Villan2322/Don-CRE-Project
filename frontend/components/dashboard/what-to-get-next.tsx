@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react'
 
 export function WhatToGetNext({ items, onAdd }: { items: string[]; onAdd?: () => void }) {
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h3 className="font-semibold">What to Get Next</h3>

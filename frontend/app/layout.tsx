@@ -1,10 +1,10 @@
-import type { Metadata } from 'next'
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
+import type { Metadata, Viewport } from 'next'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/montserrat'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'CRE Document Intelligence',
+  title: 'Deal Intelligence — Blue Commercial Properties',
   description: 'Automated deal analysis, lease abstraction, and RSF reconciliation for commercial real estate buyers',
   icons: {
     icon: [
@@ -25,13 +25,20 @@ export const metadata: Metadata = {
   },
 }
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#00236e',
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable} bg-background`}>
+    <html lang="en" className="bg-background">
       <body className="font-sans antialiased">
         {children}
       </body>

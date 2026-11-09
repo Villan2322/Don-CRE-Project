@@ -75,12 +75,12 @@ export function TabContent({
 function Notices({ deal, onUpload }: { deal: DealAnalysis; onUpload: () => void }) {
   if (deal.isSample) {
     return (
-      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
-        <Info className="h-4 w-4 shrink-0 text-warning" />
-        <span className="flex-1">
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-primary/15 bg-accent px-4 py-3 text-sm">
+        <Info className="h-4 w-4 shrink-0 text-brand-navy" />
+        <span className="min-w-0 flex-1 basis-56">
           Sample analysis of a test package — tenant rents other than Bank of America are illustrative.
         </span>
-        <button className="font-medium text-primary hover:underline" onClick={onUpload}>
+        <button className="-my-2 py-2.5 font-medium text-primary hover:underline" onClick={onUpload}>
           Analyze your own deal
         </button>
       </div>
@@ -88,7 +88,7 @@ function Notices({ deal, onUpload }: { deal: DealAnalysis; onUpload: () => void 
   }
   if (deal.pipelineErrors.length === 0) return null
   return (
-    <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+    <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive-soft px-4 py-3 text-sm">
       <div className="flex items-center gap-2 font-medium text-destructive">
         <AlertCircle className="h-4 w-4" />
         Some steps had problems — results below cover what could be read
@@ -104,7 +104,7 @@ function Notices({ deal, onUpload }: { deal: DealAnalysis; onUpload: () => void 
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-6">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-6">
       <h2 className="text-xl font-semibold">{title}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
     </div>
@@ -155,7 +155,7 @@ function ArithmeticChecks({ checks }: { checks: ArithmeticCheck[] }) {
   )
   const passed = checks.filter((c) => c.status === 'pass').length
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
       <div className="border-b border-border px-4 py-3">
         <h3 className="font-semibold">Arithmetic Checks</h3>
         <p className="text-xs text-muted-foreground">
@@ -229,7 +229,7 @@ function ExpirationsTab({ deal }: { deal: DealAnalysis }) {
         />
       </div>
       <ExpiryScheduleChart schedule={deal.expirySchedule} />
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold">Expiration order</h3>
         </div>
@@ -239,7 +239,7 @@ function ExpirationsTab({ deal }: { deal: DealAnalysis }) {
             const expired = !unknown && (t.monthsRemaining as number) < 0
             const near = !unknown && (t.monthsRemaining as number) <= 12
             return (
-              <div key={t.id} className={cn('flex items-center justify-between gap-4 p-4', unknown && 'bg-destructive/5')}>
+              <div key={t.id} className={cn('flex items-center justify-between gap-4 p-4', unknown && 'bg-destructive-soft')}>
                 <div className="min-w-0">
                   <p className="truncate font-medium">{t.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -303,7 +303,7 @@ function AbstractsTab({ deal }: { deal: DealAnalysis }) {
 
 function StatCard({ label, value, sub, highlight = false }: { label: string; value: string; sub?: string; highlight?: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className={cn('mt-1 text-2xl font-semibold tabular-nums', highlight && 'text-warning')}>{value}</div>
       {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}

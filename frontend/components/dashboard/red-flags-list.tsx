@@ -6,8 +6,8 @@ import { AlertTriangle, AlertCircle, Info, Sparkles } from 'lucide-react'
 import { RedFlag } from '@/lib/types'
 
 const SEVERITY = {
-  HIGH: { icon: AlertTriangle, bg: 'bg-destructive/10', text: 'text-destructive', badge: 'bg-destructive/20 text-destructive' },
-  MEDIUM: { icon: AlertCircle, bg: 'bg-warning/10', text: 'text-warning', badge: 'bg-warning/20 text-warning' },
+  HIGH: { icon: AlertTriangle, bg: 'bg-destructive-soft', text: 'text-destructive', badge: 'bg-destructive-soft text-destructive' },
+  MEDIUM: { icon: AlertCircle, bg: 'bg-warning-soft', text: 'text-warning', badge: 'bg-warning-soft text-warning' },
   LOW: { icon: Info, bg: 'bg-chart-1/10', text: 'text-chart-1', badge: 'bg-chart-1/20 text-chart-1' },
 }
 
@@ -17,7 +17,7 @@ export function RedFlagsList({ flags, limit }: { flags: RedFlag[]; limit?: numbe
   const high = flags.filter((f) => f.severity === 'HIGH').length
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
       <div className="border-b border-border px-4 py-3">
         <h3 className="font-semibold">Red Flags</h3>
         <p className="text-xs text-muted-foreground">
@@ -59,8 +59,8 @@ export function RedFlagsList({ flags, limit }: { flags: RedFlag[]; limit?: numbe
         })}
       </div>
       {limit && flags.length > limit && (
-        <div className="border-t border-border px-4 py-3">
-          <button className="text-sm text-primary hover:underline" onClick={() => setExpanded((v) => !v)}>
+        <div className="border-t border-border px-4 py-1">
+          <button className="py-2.5 text-sm text-primary hover:underline" onClick={() => setExpanded((v) => !v)}>
             {expanded ? 'Show fewer' : `View all ${flags.length} flags`}
           </button>
         </div>

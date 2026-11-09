@@ -23,10 +23,10 @@ const FULL_LABELS: Record<ScoreCategoryKey, string> = {
 }
 
 const TIER_STYLE = {
-  GREEN: 'text-success bg-success/10 border-success/30',
-  YELLOW: 'text-warning bg-warning/10 border-warning/30',
+  GREEN: 'text-success bg-success-soft border-success/30',
+  YELLOW: 'text-warning bg-warning-soft border-warning/30',
   ORANGE: 'text-chart-3 bg-chart-3/10 border-chart-3/30',
-  RED: 'text-destructive bg-destructive/10 border-destructive/30',
+  RED: 'text-destructive bg-destructive-soft border-destructive/30',
 }
 
 function barColor(pct: number) {
@@ -40,7 +40,7 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
   const keys = Object.keys(LABELS) as ScoreCategoryKey[]
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6">
+    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-2xl font-semibold text-balance">{deal.dealName}</h2>

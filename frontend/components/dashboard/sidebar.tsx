@@ -33,7 +33,7 @@ const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
 
 export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
   return (
-    <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
+    <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-sidebar xl:flex">
       <nav className="flex-1 p-3">
         <ul className="space-y-0.5">
           {navItems.map((item) => {
@@ -69,13 +69,13 @@ export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
 
 export function MobileTabs({ activeTab, onTabChange }: Omit<SidebarProps, 'deal'>) {
   return (
-    <div className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-border px-4 pb-2 md:hidden">
+    <div className="sticky -top-4 z-20 -mx-4 -mt-4 mb-4 flex gap-1 overflow-x-auto border-b border-border bg-background px-4 py-2 [scrollbar-width:none] md:-top-6 md:-mx-6 md:-mt-6 md:px-6 xl:hidden">
       {navItems.map((item) => (
         <button
           key={item.id}
           onClick={() => onTabChange(item.id)}
           className={cn(
-            'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium',
+            'shrink-0 rounded-md px-3 py-2.5 text-sm font-medium',
             activeTab === item.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'
           )}
         >

@@ -49,7 +49,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-dvh flex-col bg-background">
       <Header
         deal={deal}
         history={history}
