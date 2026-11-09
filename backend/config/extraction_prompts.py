@@ -147,7 +147,7 @@ EXTRACTION_CONFIGS: dict[str, ExtractionConfig] = {
                          "Extract every row of the tenant roster, including vacant suites. "
                          "Copy the stated totals exactly as printed; do not compute them.",
         "output_schema": RENT_ROLL_SCHEMA,
-        "max_tokens": 12000,
+        "max_tokens": 32000,
     },
 
     "BOMA": {
@@ -249,7 +249,7 @@ EXTRACTION_CONFIGS: dict[str, ExtractionConfig] = {
             }],
             "tenant_updates": ["string"],
         },
-        "max_tokens": 12000,
+        "max_tokens": 32000,
     },
 
     "COUNTY_PA": {

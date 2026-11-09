@@ -18,14 +18,27 @@ from agents.universal_extractor import UniversalExtractor
 
 
 def fake_api(requests, reply_text='{"document_type": "LEASE", "confidence": 0.9, "reasoning": "x"}'):
+    """Answers like the real Messages API does when streaming (server-sent events)."""
+    def event(name, data):
+        return f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(200, json={
-            "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
-            "content": [{"type": "text", "text": reply_text}],
-            "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 10, "output_tokens": 10},
-        })
+        body = "".join([
+            event("message_start", {"type": "message_start", "message": {
+                "id": "msg_test", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
+                "content": [], "stop_reason": None, "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 1}}}),
+            event("content_block_start", {"type": "content_block_start", "index": 0,
+                                          "content_block": {"type": "text", "text": ""}}),
+            event("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                          "delta": {"type": "text_delta", "text": reply_text}}),
+            event("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            event("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                                    "usage": {"output_tokens": 10}}),
+            event("message_stop", {"type": "message_stop"}),
+        ])
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
     return handler
 
 
@@ -51,14 +64,25 @@ async def test_classify_and_extract_calls_are_accepted_by_the_sdk(requests):
     assert body["model"] == base.DEFAULT_MODEL
     assert body["max_tokens"] == 500
     assert "temperature" not in body
+    assert body["stream"] is True
+    assert body["thinking"] == {"type": "between_tools"}
 
 
-async def test_ocr_call_is_accepted_by_the_sdk(requests, monkeypatch):
-    result = await OCRAgent().process(b"%PDF-1.4 fake scan", "scan.pdf", page_count=1)
-    assert result["document_readable"] is False or result["cleaned_text"]
-    body = json.loads(requests[0].content)
-    assert body["messages"][0]["content"][0]["type"] == "document"
-    assert body["messages"][0]["content"][0]["source"]["media_type"] == "application/pdf"
+async def test_ocr_splits_long_scans_into_batches(requests):
+    from reportlab.pdfgen import canvas
+    import io
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    for _ in range(7):
+        c.showPage()
+    c.save()
+    result = await OCRAgent().process(buf.getvalue(), "scan.pdf", page_count=7)
+    assert len(requests) == 3  # pages 1-3, 4-6, 7
+    prompts = sorted(json.loads(r.content)["messages"][0]["content"][1]["text"] for r in requests)
+    assert any('"=== Page 4 ==="' in p for p in prompts)
+    first = json.loads(requests[0].content)["messages"][0]["content"][0]
+    assert first["type"] == "document" and first["source"]["media_type"] == "application/pdf"
+    assert result["document_readable"]
 
 
 async def test_workspace_header_is_sent_when_configured(requests, monkeypatch):

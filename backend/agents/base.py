@@ -37,6 +37,30 @@ def fatal_api_message(error: BaseException) -> str | None:
     return None
 
 
+def thinking_off(model: str) -> dict:
+    """Request args that stop the model spending its output budget on thinking.
+
+    Transcription and extraction are copying jobs; on newer models, default
+    thinking can use most of max_tokens before any answer is written.
+    """
+    match = re.match(r"claude-[a-z]+-(\d+)", model)
+    if match and int(match.group(1)) >= 5:
+        return {"thinking": {"type": "between_tools"}}
+    return {}
+
+
+async def complete(client: anthropic.AsyncAnthropic, *, model: str, max_tokens: int,
+                   messages: list, system: Optional[str] = None) -> tuple[str, str]:
+    """One Claude call, streamed so long outputs aren't refused. Returns (text, stop_reason)."""
+    kwargs = {"model": model, "max_tokens": max_tokens, "messages": messages, **thinking_off(model)}
+    if system:
+        kwargs["system"] = system
+    async with client.messages.stream(**kwargs) as stream:
+        message = await stream.get_final_message()
+    text = "".join(block.text for block in message.content if block.type == "text")
+    return text, message.stop_reason
+
+
 class BaseAgent:
     """Shared Claude client and JSON parsing for every LLM-backed agent."""
 
@@ -54,14 +78,11 @@ class BaseAgent:
 
     async def call_llm(self, system_prompt: str, user_message: str,
                        max_tokens: int = 4000) -> str:
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=system_prompt,
+        text, stop_reason = await complete(
+            self.client, model=self.model, max_tokens=max_tokens, system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )
-        text = "".join(block.text for block in response.content if block.type == "text")
-        if response.stop_reason == "max_tokens":
+        if stop_reason == "max_tokens":
             raise ValueError(
                 f"{self.name}: response hit the {max_tokens}-token limit and was cut off"
             )
