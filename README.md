@@ -47,11 +47,18 @@ To update: `git pull && docker compose up -d --build`.
 
 Without Compose (e.g. a container platform that handles HTTPS itself): build the `Dockerfile`, set `ANTHROPIC_API_KEY`, expose port 8000, and use `/health` as the health check. Put your own login in front of it — the app has none.
 
+## Deploy on Render
+
+`render.yaml` defines one free web service built from the `Dockerfile`. In Render: **New → Blueprint**, pick this repo, enter `ANTHROPIC_API_KEY` when asked. Render generates `APP_PASSWORD`; find it under the service's **Environment** tab and log in as `don`.
+
+The free plan sleeps after 15 idle minutes (the first visit after that takes about a minute) and has 512 MB of memory, so it runs one analysis at a time with uploads up to 50 MB.
+
 ## Environment
 
 | Variable | Required | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | `/api/analyze` returns 503 without it |
+| `APP_PASSWORD` | yes, unless Caddy handles login | the app's own login (user `APP_USER`, default `don`); `/health` stays open |
 | `DOMAIN`, `APP_USER`, `APP_PASSWORD_HASH` | with Compose | Caddy's HTTPS domain and login |
 | `CLAUDE_MODEL` | no | defaults to `claude-sonnet-4-5` |
 | `MAX_UPLOAD_MB` | no | defaults to 100 |

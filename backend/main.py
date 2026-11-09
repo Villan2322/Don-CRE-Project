@@ -11,7 +11,10 @@ Jobs live in memory. Run a single instance; a restart drops in-flight jobs
 """
 
 import asyncio
+import base64
+import binascii
 import logging
+import secrets
 import os
 import time
 import uuid
@@ -19,7 +22,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -50,6 +54,34 @@ app = FastAPI(
     description="AI-assisted document analysis for commercial real estate due diligence",
     version="3.0.0",
 )
+# Login. When APP_PASSWORD is set, every page and API call needs it (HTTP basic auth,
+# which the browser prompts for). Only /health stays open for the platform's checks.
+APP_USER = os.environ.get("APP_USER", "don")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+if not APP_PASSWORD:
+    log.warning("APP_PASSWORD is not set — the app is open to anyone who can reach it")
+
+
+def _authorized(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic":
+        return False
+    try:
+        user, _, password = base64.b64decode(encoded).decode("utf-8").partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    return secrets.compare_digest(user.encode(), APP_USER.encode()) & \
+        secrets.compare_digest(password.encode(), APP_PASSWORD.encode())
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    if APP_PASSWORD and request.url.path != "/health" and not _authorized(request.headers.get("authorization", "")):
+        return Response("Login required", status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="CRE Intelligence", charset="UTF-8"'})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o for o in os.environ.get("CORS_ORIGINS", "").split(",") if o],

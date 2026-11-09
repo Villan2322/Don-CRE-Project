@@ -228,3 +228,17 @@ def test_analyze_requires_api_key(monkeypatch):
 def test_health(client):
     assert client.get("/api/health").json()["anthropic_key_configured"] is True
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_password_protects_everything_but_health(monkeypatch):
+    import base64 as b64
+    import main
+    monkeypatch.setattr(main, "APP_PASSWORD", "s3cret")
+    c = TestClient(main.app)
+    assert c.get("/health").status_code == 200
+    assert c.get("/api/health").status_code == 401
+    assert c.get("/api/health").headers["www-authenticate"].startswith("Basic")
+    bad = "Basic " + b64.b64encode(b"don:wrong").decode()
+    assert c.get("/api/health", headers={"Authorization": bad}).status_code == 401
+    good = "Basic " + b64.b64encode(b"don:s3cret").decode()
+    assert c.get("/api/health", headers={"Authorization": good}).status_code == 200
