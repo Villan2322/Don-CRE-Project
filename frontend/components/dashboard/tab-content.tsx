@@ -16,6 +16,7 @@ import { LeaseAbstractsTable } from './lease-abstracts-table'
 import { DocumentsList } from './documents-list'
 import { DocumentUpload } from './document-upload'
 import { MobileTabs } from './sidebar'
+import { AreaAudit } from './area-audit'
 
 interface TabContentProps {
   activeTab: TabId
@@ -33,7 +34,9 @@ export function TabContent({ activeTab, deal, history, onAnalysisComplete, onTab
       case 'rent-roll':
         return <RentRollTab deal={deal} />
       case 'lease-audit':
-        return <LeaseAuditTab deal={deal} />
+        return <AreaAudit deal={deal} onUpload={() => onTabChange('upload')} />
+      case 'expirations':
+        return <ExpirationsTab deal={deal} />
       case 'risk':
         return <RiskTab deal={deal} />
       case 'abstracts':
@@ -188,7 +191,7 @@ function RentRollTab({ deal }: { deal: DealAnalysis }) {
   )
 }
 
-function LeaseAuditTab({ deal }: { deal: DealAnalysis }) {
+function ExpirationsTab({ deal }: { deal: DealAnalysis }) {
   const atRisk = deal.tenants.filter((t) => t.monthsRemaining === null || t.monthsRemaining <= 12)
   const schedule = [...deal.tenants].sort(
     (a, b) => (a.monthsRemaining ?? Number.MAX_SAFE_INTEGER) - (b.monthsRemaining ?? Number.MAX_SAFE_INTEGER)
@@ -196,7 +199,7 @@ function LeaseAuditTab({ deal }: { deal: DealAnalysis }) {
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Lease Audit" subtitle="Expiration schedule, WALT, and income at risk" />
+      <SectionHeader title="Lease Expirations" subtitle="Expiration schedule, WALT, and income at risk" />
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
           label="WALT"

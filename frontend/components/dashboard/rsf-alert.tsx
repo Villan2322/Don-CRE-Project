@@ -39,7 +39,11 @@ export function RSFAlert({ rsf }: { rsf: DealAnalysis['rsfReconciliation'] }) {
               <div>
                 <div className="text-sm font-medium text-success">Estimated annual recovery</div>
                 <div className="text-2xl font-bold text-success">{money(rsf.estimatedAnnualRecovery)}</div>
-                <div className="text-xs text-muted-foreground">Gap × average rent per SF</div>
+                <div className="text-xs text-muted-foreground">
+                  {rsf.camRecovery
+                    ? `${money(rsf.baseRentRecovery)} base rent at ${money(rsf.averageRentPSF, 2)}/SF + ${money(rsf.camRecovery)} CAM at ${money(rsf.camRatePSF, 2)}/SF`
+                    : 'Gap × average rent per SF'}
+                </div>
               </div>
               <div className="ml-auto text-right">
                 <div className="text-xs text-muted-foreground">Gap</div>

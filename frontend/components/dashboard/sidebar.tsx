@@ -9,6 +9,7 @@ import {
   Shield,
   FileStack,
   Upload,
+  Ruler,
 } from 'lucide-react'
 import { timestamp } from '@/lib/format'
 import { DealAnalysis, TabId } from '@/lib/types'
@@ -21,9 +22,10 @@ interface SidebarProps {
 
 const navItems: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'snapshot', label: 'Deal Snapshot', icon: LayoutDashboard },
+  { id: 'lease-audit', label: 'Lease Audit', icon: Ruler },
   { id: 'audit', label: 'Audit Log', icon: AlertTriangle },
   { id: 'rent-roll', label: 'Rent Roll', icon: Table2 },
-  { id: 'lease-audit', label: 'Lease Audit', icon: FileText },
+  { id: 'expirations', label: 'Lease Expirations', icon: FileText },
   { id: 'risk', label: 'Risk Dashboard', icon: Shield },
   { id: 'abstracts', label: 'Lease Abstracts', icon: FileStack },
   { id: 'upload', label: 'Upload Documents', icon: Upload },

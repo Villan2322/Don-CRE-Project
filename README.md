@@ -20,7 +20,14 @@ Claude **reads** the documents. Code **computes** every number. That split is th
 | AI review | `agents/synthesis.py` | Lease-level risks, cross-document conflicts, executive summary, requests. Never produces dashboard numbers. |
 | Score | `services/deal_metrics.py` | Six categories (20/20/20/20/15/15), every point with a reason. GREEN 80+, YELLOW 60–79, ORANGE 40–59, RED below 40. |
 
-The RSF Recovery Alert fires when BOMA and the billed area differ by more than 5%; the estimate is gap × average rent per SF. With leases but no rent roll, only the leased suites are compared.
+The RSF Recovery Alert fires when BOMA and the billed area differ by more than 5%; the estimate is gap × (average rent per SF + CAM per SF). With leases but no rent roll, only the leased suites are compared.
+
+**Lease audit** (`services/lease_audit.py`, the Lease Audit tab) answers Don's core question — is each tenant paying for the space it occupies? Suite by suite:
+
+- billed SF (rent roll or lease) vs BOMA SF, and the billed vs measured load factor
+- base rent gap = SF gap × the tenant's rent per SF
+- CAM gap = expense pool × BOMA share − CAM billed. The pool is the CAM reconciliation total when there is one, otherwise the management report's operating expenses annualized. Gross leases recover no CAM; base-year leases are marked as an upper bound.
+- a leverage call from each lease's remeasurement and "deemed area" language: can remeasure, negotiable, locked, need lease, or overbilled (a claim risk)
 
 ## Layout
 

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Optional
 
+from services import lease_audit
+
 # ── Thresholds ───────────────────────────────────────────────────────────────
 
 RSF_ALERT_PCT = 5.0          # BOMA vs rent roll gap that fires the RSF Recovery Alert
@@ -191,6 +193,15 @@ class LeaseRecord:
     filename: str
     source: str  # "lease" or "abstract"
     confidence: Optional[float] = None
+    pro_rata_share: Optional[float] = None
+    pro_rata_basis: Optional[str] = None
+    recoverable_expenses: Optional[str] = None
+    expense_exclusions: Optional[str] = None
+    admin_fee: Optional[str] = None
+    gross_up: Optional[str] = None
+    base_year: Optional[str] = None
+    area_deemed_final: Optional[str] = None
+    rsf_source_text: Optional[str] = None
 
 
 @dataclass
@@ -209,8 +220,11 @@ class TenantRecord:
     ar_over_60: Optional[float] = None
     ar_over_90: Optional[float] = None
     ar_note: Optional[str] = None
+    rr_cam_monthly: Optional[float] = None
+    rr_share: Optional[float] = None
     lease: Optional[LeaseRecord] = None
     boma_rsf: Optional[float] = None
+    boma_usf: Optional[float] = None
     sources: list[str] = field(default_factory=list)
 
 
@@ -248,7 +262,20 @@ def _lease_from_extraction(e: dict, filename: str, missing: list[str]) -> LeaseR
         filename=filename,
         source="lease",
         confidence=_confidence(e),
+        pro_rata_share=num(e.get("pro_rata_share_pct")),
+        pro_rata_basis=text(e.get("pro_rata_share_basis")),
+        recoverable_expenses=text(e.get("recoverable_expenses")),
+        expense_exclusions=text(e.get("expense_exclusions")),
+        admin_fee=text(e.get("admin_fee")),
+        gross_up=text(e.get("gross_up")),
+        base_year=text(e.get("base_year")),
+        area_deemed_final=text(e.get("area_deemed_final")),
+        rsf_source_text=_source_text(e.get("rentable_sf")),
     )
+
+
+def _source_text(field_value: Any) -> Optional[str]:
+    return text(field_value.get("source_text")) if isinstance(field_value, dict) else None
 
 
 def _lease_from_abstract_row(r: dict, filename: str) -> LeaseRecord:
@@ -282,6 +309,7 @@ class Sources:
     mgmt_file: Optional[str]
     model: dict
     county: dict
+    cam_rec: dict
     failed_extractions: list[dict]
 
 
@@ -302,6 +330,7 @@ def collect_sources(extractions: list[dict]) -> Sources:
     mgmt_file = None
     model: dict = {}
     county: dict = {}
+    cam_rec: dict = {}
     failed: list[dict] = []
 
     for ext in extractions:
@@ -337,6 +366,8 @@ def collect_sources(extractions: list[dict]) -> Sources:
             model = data
         elif doc_type == "COUNTY_PA":
             county = data
+        elif doc_type == "CAM_RECONCILIATION":
+            cam_rec = data
 
     # A management report's rent roll stands in when no separate rent roll was uploaded.
     if not rr_rows and mgmt_rows:
@@ -345,7 +376,7 @@ def collect_sources(extractions: list[dict]) -> Sources:
         present.add("RENT_ROLL")
 
     return Sources(present, rr_rows, rr_summary, rr_file, rr_date, leases, boma_suites, boma_totals,
-                   boma_file, ar_entries, mgmt, mgmt_file, model, county, failed)
+                   boma_file, ar_entries, mgmt, mgmt_file, model, county, cam_rec, failed)
 
 
 def _merge_duplicate_leases(leases: list[LeaseRecord]) -> list[LeaseRecord]:
@@ -361,7 +392,7 @@ def _merge_duplicate_leases(leases: list[LeaseRecord]) -> list[LeaseRecord]:
         older = twin if newer is lease else lease
         for attr in ("tenant_name", "suite", "rsf", "start", "annual_rent", "monthly_rent", "rent_psf",
                      "escalation", "expense_structure", "cam_cap", "renewal_options", "ti_allowance",
-                     "remeasurement_rights", "premises_address"):
+                     "remeasurement_rights", "premises_address", "pro_rata_share", "pro_rata_basis", "recoverable_expenses", "expense_exclusions", "admin_fee", "gross_up", "base_year", "area_deemed_final", "rsf_source_text"):
             if getattr(newer, attr) in (None, ""):
                 setattr(newer, attr, getattr(older, attr))
         newer.filename = f"{newer.filename}, {older.filename}"
@@ -444,6 +475,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
             month_to_month=_is_month_to_month(row),
             ar_balance=num(row.get("ar_balance")), ar_over_60=num(row.get("ar_over_60")),
             ar_over_90=num(row.get("ar_over_90")), sources=["rent_roll"],
+            rr_cam_monthly=num(row.get("monthly_cam_charges")), rr_share=num(row.get("pro_rata_share_pct")),
         ))
     has_rent_roll = bool(tenants) or vacant_rsf > 0
 
@@ -465,6 +497,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
         match = _find_tenant(tenants, text(suite.get("tenant_name")), text(suite.get("suite")))
         if match and match.boma_rsf is None:
             match.boma_rsf = rsf
+            match.boma_usf = num(suite.get("usable_sf"))
             match.sources.append("boma")
         else:
             unmatched_boma.append(suite)
@@ -591,6 +624,65 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
             "alertTriggered": abs(pct) > RSF_ALERT_PCT,
             "comparable": True,
         })
+    # Lease audit: suite-by-suite area and CAM, and whether the leases let the landlord fix it.
+    pool, pool_basis = _expense_pool(src)
+    cam_rows = {tenant_key(text(r.get("tenant_name")) or ""): r
+                for r in (src.cam_rec.get("tenant_reconciliations") or []) if text(r.get("tenant_name"))}
+    audit_inputs = []
+    for t, row in zip(tenants, rows):
+        lease = t.lease
+        cam_row = cam_rows.get(tenant_key(t.name)) or next(
+            (r for k, r in cam_rows.items() if names_match(text(r.get("tenant_name")), t.name)), None)
+        billed_cam, billed_cam_basis = None, None
+        if t.rr_cam_monthly is not None:
+            billed_cam, billed_cam_basis = t.rr_cam_monthly * 12, "rent roll (monthly × 12)"
+        elif cam_row and num(cam_row.get("amount_billed")) is not None:
+            billed_cam, billed_cam_basis = num(cam_row.get("amount_billed")), "CAM reconciliation"
+        share, share_src = t.rr_share, "rent roll" if t.rr_share is not None else None
+        if share is None and cam_row and num(cam_row.get("pro_rata_share_pct")) is not None:
+            share, share_src = num(cam_row.get("pro_rata_share_pct")), "CAM reconciliation"
+        if share is None and lease and lease.pro_rata_share is not None:
+            share, share_src = lease.pro_rata_share, "lease"
+        billed_rsf = t.rr_rsf or (lease.rsf if lease else None)
+        audit_inputs.append({
+            "id": row["id"], "name": t.name, "suite": row["suite"],
+            "billed_rsf": billed_rsf, "billed_rsf_source": "rent roll" if t.rr_rsf else ("lease" if billed_rsf else None),
+            "boma_rsf": t.boma_rsf, "boma_usf": t.boma_usf,
+            "rent_psf": row["annualRent"] / billed_rsf if row["annualRent"] and billed_rsf else None,
+            "billed_cam": billed_cam, "billed_cam_basis": billed_cam_basis,
+            "billed_share": share, "billed_share_source": share_src,
+            "has_lease": lease is not None and lease.source == "lease",
+            "expense_structure": _expense_label(lease.expense_structure) if lease else None,
+            "expense_structure_text": lease.expense_structure if lease else None,
+            "remeasurement": lease.remeasurement_rights if lease else None,
+            "deemed_final": lease.area_deemed_final if lease else None,
+            "rsf_source": lease.rsf_source_text if lease else None,
+            "base_year": lease.base_year if lease else None,
+            "cam_cap": lease.cam_cap if lease else None,
+            "recoverable": lease.recoverable_expenses if lease else None,
+            "exclusions": lease.expense_exclusions if lease else None,
+            "admin_fee": lease.admin_fee if lease else None,
+            "gross_up": lease.gross_up if lease else None,
+            "lease_share": lease.pro_rata_share if lease else None,
+            "lease_share_basis": lease.pro_rata_basis if lease else None,
+            "lease_file": lease.filename if lease else None,
+        })
+    audit = lease_audit.audit(
+        audit_inputs, boma_total_rsf=boma_total, boma_total_usf=num(src.boma_totals.get("total_usable_sf")),
+        boma_load_factor=num(src.boma_totals.get("building_load_factor")), pool=pool, pool_basis=pool_basis)
+
+    # The building-wide gap is worth base rent plus the CAM those feet should carry.
+    cam_psf = audit["summary"]["camRatePSF"]
+    if rsf_rec["comparable"] and rsf_rec["deltaSF"] > 0:
+        base = rsf_rec["deltaSF"] * avg_psf if avg_psf else 0
+        cam = rsf_rec["deltaSF"] * cam_psf if cam_psf else 0
+        rsf_rec.update({"baseRentRecovery": round(base, 2), "camRecovery": round(cam, 2),
+                        "estimatedAnnualRecovery": round(base + cam, 2), "camRatePSF": cam_psf,
+                        "averageRentPSF": round(avg_psf, 2) if avg_psf else None})
+    else:
+        rsf_rec.update({"baseRentRecovery": 0, "camRecovery": 0, "camRatePSF": cam_psf,
+                        "averageRentPSF": round(avg_psf, 2) if avg_psf else None})
+
     county_total = rsf_rec["countyTotalSF"]
     if county_total:
         canopy = (num(src.county.get("canopy_sf")) or 0) + (num(src.county.get("porch_sf")) or 0)
@@ -642,6 +734,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
         "occupied_rsf": round(occupied_rsf, 2),
         "has_rent_roll": has_rent_roll,
         "rsf_reconciliation": rsf_rec,
+        "lease_audit": audit,
         "unmatched_boma_suites": [{"suite": text(s.get("suite")), "tenant": text(s.get("tenant_name")),
                                    "rentable_sf": num(s.get("rentable_sf"))} for s in unmatched_boma],
         "financial": {
@@ -674,6 +767,22 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
                           or text(src.model.get("property_name"))),
         "_sources": src,
     }
+
+
+def _expense_pool(src: Sources) -> tuple[Optional[float], Optional[str]]:
+    """Annual expenses tenants share. A CAM reconciliation is the real figure; opex is a stand-in."""
+    total = num(src.cam_rec.get("total_cam_expenses"))
+    if total:
+        year = text(src.cam_rec.get("reconciliation_year"))
+        return total, f"CAM reconciliation{' ' + year if year else ''}"
+    for key, label in (("income_year_to_date", "year-to-date"), ("income_period_to_date", "period")):
+        period = src.mgmt.get(key) or {}
+        opex, months = num(period.get("operating_expenses")), num(period.get("months_covered"))
+        if opex and months:
+            span = text(period.get("period_label")) or f"{months:g} months"
+            return opex * 12 / months, (f"Operating expenses annualized from {label} ({span}, management report) — "
+                                        "all categories, before lease exclusions")
+    return None, None
 
 
 def _noi(src: Sources) -> tuple[Optional[float], Optional[str]]:
@@ -957,8 +1066,7 @@ def computed_red_flags(m: dict) -> list[dict]:
             f"BOMA ({rsf['bomaTotalSF']:,.0f} SF) {'exceeds' if over else 'is below'} the "
             f"{rsf['occupiedSource'] or 'rent roll'} ({rsf['rentRollOccupiedSF']:,.0f} SF) by {abs(rsf['deltaSF']):,.0f} SF "
             f"({abs(rsf['deltaPercent']):.1f}%)",
-            (f"About ${rsf['estimatedAnnualRecovery']:,.0f}/yr may not be billed at the average rent of "
-             f"${m['financial']['averageRentPSF']:.2f}/SF" if over and rsf["estimatedAnnualRecovery"]
+            (_recovery_text(rsf) if over and rsf["estimatedAnnualRecovery"]
              else "Tenants may be billed on more area than was measured"),
             "Confirm which measurement the leases reference; request remeasurement or adjust pricing")
 
@@ -1025,14 +1133,32 @@ def computed_red_flags(m: dict) -> list[dict]:
             f"{len(mtm)} tenant(s) are month-to-month: {names}",
             f"{sum(p for _, p in mtm):.0f}% of rent can leave on 30 days' notice",
             "Ask which are negotiating renewals; price these as near-term rollover")
-    off = [r for r in rows if r["rsfDelta"] is not None and r["rsf"]
-           and abs(r["rsfDelta"]) / r["rsf"] * 100 > RSF_ALERT_PCT]
-    if off:
-        detail = "; ".join(f"{r['name']} {r['rsf']:,.0f} vs {r['bomaRsf']:,.0f} SF" for r in off[:6])
-        add("MEDIUM", "Suite RSF Variance",
-            f"{len(off)} suite(s) are billed on area more than {RSF_ALERT_PCT:g}% off the BOMA measurement: {detail}",
-            f"{sum(r['rsfDelta'] for r in off):+,.0f} SF across these suites",
-            "Check each lease's remeasurement clause before closing")
+    audit = m.get("lease_audit") or {}
+    summ = audit.get("summary") or {}
+    under = [a for a in audit.get("tenants", []) if a["deltaSF"] and a["deltaSF"] > 0
+             and a["deltaPct"] > lease_audit.MATERIAL_PCT]
+    if under:
+        open_dollars = (summ.get("collectibleUpside") or 0) + (summ.get("pendingUpside") or 0)
+        under.sort(key=lambda a: -(a["totalGap"] or 0))
+        detail = "; ".join(f"{a['name']} {a['billedRsf']:,.0f} vs {a['bomaRsf']:,.0f} SF" for a in under[:5])
+        calls = summ.get("leverage") or {}
+        lever = ", ".join(f"{n} {LEVERAGE_WORDS[c]}" for c, n in calls.items() if c in LEVERAGE_WORDS)
+        dollars = (f"${summ['totalUpside']:,.0f}/yr" + (f" (${summ['baseRentUpside']:,.0f} base rent + "
+                   f"${summ['camUpside']:,.0f} CAM)" if summ.get("camUpside") else " in base rent")
+                   if summ.get("totalUpside") else f"{summ['underbilledSF']:,.0f} SF")
+        add("HIGH" if open_dollars > 25000 else "MEDIUM", "Suite Area Underbilled",
+            f"{len(under)} suite(s) billed on {summ['underbilledSF']:,.0f} SF less than BOMA measured: {detail}",
+            f"{dollars} not collected" + (f". Leverage: {lever}" if lever else ""),
+            "See the Lease Audit tab for each lease's remeasurement terms; correct the area where the lease allows "
+            "it and price the rest into renewals")
+    over_t = [a for a in audit.get("tenants", []) if a["leverage"]["call"] == "OVERBILLED"]
+    if over_t:
+        detail = "; ".join(f"{a['name']} {a['billedRsf']:,.0f} vs {a['bomaRsf']:,.0f} SF" for a in over_t[:5])
+        add("MEDIUM", "Tenant Overbilled",
+            f"{len(over_t)} tenant(s) billed on more area than BOMA measured: {detail}",
+            (f"About ${summ['overbilledExposure']:,.0f}/yr a tenant could claim back" if summ.get("overbilledExposure")
+             else "A tenant could claim a refund or a rent reduction"),
+            "Price the reduction in, or get estoppels confirming the billed area")
 
     for c in m["expiry_conflicts"]:
         add("MEDIUM", "Expiry Conflict",
@@ -1069,14 +1195,43 @@ def computed_red_flags(m: dict) -> list[dict]:
     return flags
 
 
+LEVERAGE_WORDS = {"STRONG": "can be remeasured", "NEGOTIABLE": "negotiable", "NONE": "locked by the lease",
+                  "NO_LEASE": "no lease on file"}
+
+
+def _recovery_text(rsf: dict) -> str:
+    base, cam = rsf.get("baseRentRecovery") or 0, rsf.get("camRecovery") or 0
+    if cam:
+        return (f"About ${rsf['estimatedAnnualRecovery']:,.0f}/yr may not be billed: ${base:,.0f} base rent at "
+                f"${rsf['averageRentPSF']:.2f}/SF plus ${cam:,.0f} CAM at ${rsf['camRatePSF']:.2f}/SF")
+    return (f"About ${rsf['estimatedAnnualRecovery']:,.0f}/yr may not be billed at the average rent of "
+            f"${rsf['averageRentPSF']:.2f}/SF")
+
+
 def what_to_get_next(m: dict, synthesis_items: list[Any]) -> list[str]:
     present = set(m["present_types"])
     items: list[str] = []
-    seen: set[str] = set()
+    audit_lease = {tenant_key(a["name"]) for a in (m.get("lease_audit") or {}).get("tenants", [])
+                   if a["leverage"]["call"] == "NO_LEASE"}
+    asked: set[str] = set()
     for r in m["tenants"]:
-        if r["monthsRemaining"] is None and not r["monthToMonth"] and tenant_key(r["name"]) not in seen:
-            seen.add(tenant_key(r["name"]))
+        key = tenant_key(r["name"])
+        if r["monthsRemaining"] is None and not r["monthToMonth"] and key not in asked and key not in audit_lease:
+            asked.add(key)
             items.append(f"Executed lease for {r['name']} — no expiration on file ({r['incomeConcentration']:.0f}% of rent)")
+    seen = {tenant_key(r["name"]) for r in m["tenants"] if r["monthsRemaining"] is None and not r["monthToMonth"]}
+    audit = m.get("lease_audit") or {}
+    need_lease = [a for a in audit.get("tenants", []) if a["leverage"]["call"] == "NO_LEASE"]
+    if need_lease:
+        need_lease.sort(key=lambda a: -(a["totalGap"] or 0))
+        names = ", ".join(a["name"] for a in need_lease[:4]) + (" and others" if len(need_lease) > 4 else "")
+        money_at = sum(a["totalGap"] or 0 for a in need_lease)
+        undated = [a["name"] for a in need_lease if tenant_key(a["name"]) in seen]
+        items.append(f"Leases for {names} — their remeasurement terms decide whether "
+                     f"{f'${money_at:,.0f}/yr' if money_at else 'the area gap'} can be collected"
+                     + (f" ({', '.join(undated)} also has no expiration on file)" if undated else ""))
+    if audit.get("available") and "CAM_RECONCILIATION" not in present:
+        items.append("Last year's CAM reconciliation — the exact expense pool and each tenant's billed share")
     if any(r["monthToMonth"] for r in m["tenants"]):
         items.append("Status of month-to-month tenants — who is renewing, who is leaving")
     for key, label, types in CORE_DOC_GROUPS:
@@ -1084,7 +1239,7 @@ def what_to_get_next(m: dict, synthesis_items: list[Any]) -> list[str]:
         if not has:
             items.append(f"{label} — {DOC_REQUEST_REASONS[key]}")
     no_lease = [r["name"] for r in m["tenants"] if not r["hasLease"] and r["monthsRemaining"] is not None]
-    if no_lease and ("LEASE" in present or "LEASE_ABSTRACT" in present):
+    if no_lease and not need_lease and ("LEASE" in present or "LEASE_ABSTRACT" in present):
         items.append(f"Leases for {', '.join(no_lease[:4])}{' and others' if len(no_lease) > 4 else ''}")
     if m["tenants"] and not m["has_ar_aging"]:
         items.append("AR aging report — shows which balances are 30, 60, 90+ days past due")
@@ -1237,6 +1392,7 @@ def build_report(*, deal_id: str, deal_name: str, classified_documents: list[dic
         "scoreBreakdown": score["categories"],
         "executiveSummary": text(synthesis.get("executive_summary")),
         "rsfReconciliation": m["rsf_reconciliation"],
+        "leaseAudit": m["lease_audit"],
         "financialSummary": fin,
         "walt": m["walt_months"],
         "waltCoverage": m["walt_coverage_pct"],

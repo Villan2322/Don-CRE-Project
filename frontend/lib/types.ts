@@ -35,10 +35,70 @@ export interface RsfReconciliation {
   deltaSF: number
   deltaPercent: number
   estimatedAnnualRecovery: number
+  baseRentRecovery?: number
+  camRecovery?: number
+  camRatePSF?: number | null
+  averageRentPSF?: number | null
   alertTriggered: boolean
   comparable: boolean
   countyTotalSF: number | null
   countyNote: string | null
+}
+
+export type LeverageCall = 'STRONG' | 'NEGOTIABLE' | 'NONE' | 'NO_LEASE' | 'OVERBILLED' | 'MATCHES'
+
+export interface LeaseAuditRow {
+  tenantId: string
+  name: string
+  suite: string
+  billedRsf: number | null
+  billedRsfSource: string | null
+  bomaRsf: number | null
+  bomaUsf: number | null
+  deltaSF: number | null
+  deltaPct: number | null
+  billedLoadFactor: number | null
+  bomaLoadFactor: number | null
+  billedShare: number | null
+  billedShareSource: string | null
+  bomaShare: number | null
+  rentPSF: number | null
+  baseRentGap: number | null
+  billedCam: number | null
+  billedCamBasis: string | null
+  correctCam: number | null
+  camGap: number | null
+  totalGap: number | null
+  correctedAnnualRent: number | null
+  recoversExpenses: boolean | null
+  expenseNote: string | null
+  leverage: { call: LeverageCall | null; reason: string; clause: string | null }
+  terms: Record<string, string | number | null>
+  leaseFile: string | null
+}
+
+export interface LeaseAudit {
+  available: boolean
+  tenants: LeaseAuditRow[]
+  summary: {
+    suitesMeasured: number
+    suitesUnderbilled: number
+    suitesOverbilled: number
+    underbilledSF: number
+    overbilledSF: number
+    baseRentUpside: number | null
+    camUpside: number | null
+    totalUpside: number | null
+    collectibleUpside: number | null
+    pendingUpside?: number | null
+    overbilledExposure: number | null
+    expensePool: number | null
+    expensePoolBasis: string | null
+    camRatePSF: number | null
+    bomaLoadFactor: number | null
+    billedLoadFactor: number | null
+    leverage: Partial<Record<LeverageCall, number>>
+  }
 }
 
 export interface FinancialSummary {
@@ -166,6 +226,7 @@ export interface DealAnalysis {
   scoreBreakdown: Record<ScoreCategoryKey, ScoreCategory>
   executiveSummary: string | null
   rsfReconciliation: RsfReconciliation
+  leaseAudit?: LeaseAudit
   financialSummary: FinancialSummary
   walt: number | null
   waltCoverage: number
@@ -182,4 +243,4 @@ export interface DealAnalysis {
   isSample: boolean
 }
 
-export type TabId = 'snapshot' | 'audit' | 'rent-roll' | 'lease-audit' | 'risk' | 'abstracts' | 'upload'
+export type TabId = 'snapshot' | 'lease-audit' | 'audit' | 'rent-roll' | 'expirations' | 'risk' | 'abstracts' | 'upload'

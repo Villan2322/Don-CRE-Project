@@ -80,7 +80,12 @@ def test_rsf_reconciliation_matches_the_bayou_numbers(metrics):
     assert rsf["deltaPercent"] == pytest.approx(18.53, abs=0.01)
     assert rsf["alertTriggered"]
     avg_psf = metrics["financial"]["totalAnnualRent"] / 24847
-    assert rsf["estimatedAnnualRecovery"] == pytest.approx(4604.52 * avg_psf, abs=0.01)
+    assert rsf["baseRentRecovery"] == pytest.approx(4604.52 * avg_psf, abs=0.01)
+    # Plus the CAM those feet should carry: August opex x 12, spread over the BOMA building.
+    cam_psf = round(21881.36 * 12 / 29451.52, 2)
+    assert rsf["camRatePSF"] == cam_psf
+    assert rsf["camRecovery"] == pytest.approx(4604.52 * cam_psf, abs=0.01)
+    assert rsf["estimatedAnnualRecovery"] == pytest.approx(rsf["baseRentRecovery"] + rsf["camRecovery"], abs=0.01)
     assert "3,389 SF of canopy/porch" in rsf["countyNote"]
 
 
@@ -187,7 +192,7 @@ def test_red_flags_cover_the_known_problems(report):
     lapsed = next(f for f in report["redFlags"] if f["category"] == "Expired Since Report")
     assert lapsed["description"].startswith("2 lease(s) ran out after the 2025-08-20 report")
     assert "AR Delinquency" in cats
-    assert cats.count("Suite RSF Variance") == 1  # consolidated
+    assert cats.count("Suite Area Underbilled") == 1  # consolidated
     severities = [f["severity"] for f in report["redFlags"]]
     assert severities == sorted(severities, key=["HIGH", "MEDIUM", "LOW"].index)
     missing = next(f for f in report["redFlags"] if f["category"] == "Missing Expiry")
@@ -205,7 +210,9 @@ def test_ai_review_flags_are_merged_and_labelled(metrics):
     ai = [f for f in r["redFlags"] if f["source"] == "ai_review"]
     assert ai and ai[0]["severity"] == "HIGH"
     assert any("Tenant estoppels" in item for item in r["whatToGetNext"])
-    assert r["whatToGetNext"][0].startswith("Executed lease for Retrev Legal")
+    first = r["whatToGetNext"][0]
+    assert first.startswith("Leases for Retrev Legal, Apex Roofing")  # biggest dollar gaps first
+    assert "(Retrev Legal also has no expiration on file)" in first
 
 
 def test_report_has_every_field_the_dashboard_reads(report):
