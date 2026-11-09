@@ -74,6 +74,8 @@ export function TenantTable({ tenants }: { tenants: Tenant[] }) {
                         {monthYear(t.leaseExpiry)}
                         <div className="text-xs text-muted-foreground">{term(t.monthsRemaining)}</div>
                       </div>
+                    ) : t.monthToMonth ? (
+                      <span className="text-warning">Month-to-month</span>
                     ) : (
                       <span className="text-destructive">Unknown</span>
                     )}

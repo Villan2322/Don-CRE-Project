@@ -4,6 +4,9 @@
   "propertyAddress": "5041 Bayou Blvd, Pensacola, FL 32503",
   "submittedAt": "2026-11-05T15:00:00Z",
   "asOf": "2026-11-05",
+  "dataAsOf": "2025-08-20",
+  "dataAgeMonths": 14,
+  "landlordUseSpaces": [],
   "score": 63,
   "tier": "YELLOW",
   "dealReadiness": "Proceed with conditions",
@@ -99,7 +102,7 @@
           "points": 2.1
         },
         {
-          "text": "5 tenant(s) expired, expiring within 12 months, or undated",
+          "text": "5 tenant(s) expired, expiring within 12 months, month-to-month, or undated",
           "earned": false,
           "points": 0
         }
@@ -138,7 +141,7 @@
       ]
     }
   },
-  "executiveSummary": "Six-tenant office building with two anchors paying 80% of rent. The BOMA measurement shows 4,605 SF more rentable area than the rent roll bills. Retrev Legal (45% of rent) has no lease on file and is $18,360 past due 90+ days.",
+  "executiveSummary": "Two-story office building at 5041 Bayou Blvd with six tenants.",
   "rsfReconciliation": {
     "bomaTotalSF": 29451.52,
     "rentRollOccupiedSF": 24847.0,
@@ -178,30 +181,12 @@
     },
     {
       "severity": "HIGH",
-      "category": "Expired Lease",
-      "description": "Doreen McClung lease expired 2026-05-31 (6 months ago)",
-      "impact": "3% of rent may be month-to-month or holding over",
-      "resolution": "Request any renewal or extension for Doreen McClung, or price in the vacancy",
-      "source": "computed",
-      "id": "rf-2"
-    },
-    {
-      "severity": "HIGH",
-      "category": "Expired Lease",
-      "description": "Apex Roofing lease expired 2025-10-31 (13 months ago)",
-      "impact": "6% of rent may be month-to-month or holding over",
-      "resolution": "Request any renewal or extension for Apex Roofing, or price in the vacancy",
-      "source": "computed",
-      "id": "rf-3"
-    },
-    {
-      "severity": "HIGH",
       "category": "Missing Expiry",
       "description": "Retrev Legal (Suite 301) has no documented expiration",
       "impact": "Rollover risk can't be assessed for 45% of rent",
       "resolution": "Request the executed lease and any amendments for Retrev Legal",
       "source": "computed",
-      "id": "rf-4"
+      "id": "rf-2"
     },
     {
       "severity": "HIGH",
@@ -210,7 +195,16 @@
       "impact": "Collection risk on 45% of rent",
       "resolution": "Request payment history and confirm the balance with management",
       "source": "computed",
-      "id": "rf-5"
+      "id": "rf-3"
+    },
+    {
+      "severity": "HIGH",
+      "category": "Expired Since Report",
+      "description": "2 lease(s) ran out after the 2025-08-20 report: Apex Roofing (2025-10-31), Doreen McClung (2026-05-31)",
+      "impact": "9% of rent \u2014 renewed, holding over, or gone is unknown",
+      "resolution": "Request a current rent roll and any renewals signed since the report",
+      "source": "computed",
+      "id": "rf-4"
     },
     {
       "severity": "MEDIUM",
@@ -219,7 +213,7 @@
       "impact": "4% of rent rolls within a year of today",
       "resolution": "Ask about renewal status with Feldmann Agency",
       "source": "computed",
-      "id": "rf-6"
+      "id": "rf-5"
     },
     {
       "severity": "MEDIUM",
@@ -228,7 +222,7 @@
       "impact": "8% of rent rolls within a year of today",
       "resolution": "Ask about renewal status with Complete Apartment Care",
       "source": "computed",
-      "id": "rf-7"
+      "id": "rf-6"
     },
     {
       "severity": "MEDIUM",
@@ -237,7 +231,7 @@
       "impact": "Loss of this tenant would materially cut income",
       "resolution": "Review Bank of America's credit, guarantor, and renewal options",
       "source": "computed",
-      "id": "rf-8"
+      "id": "rf-7"
     },
     {
       "severity": "MEDIUM",
@@ -246,7 +240,7 @@
       "impact": "Loss of this tenant would materially cut income",
       "resolution": "Review Retrev Legal's credit, guarantor, and renewal options",
       "source": "computed",
-      "id": "rf-9"
+      "id": "rf-8"
     },
     {
       "severity": "MEDIUM",
@@ -254,6 +248,15 @@
       "description": "5 suite(s) are billed on area more than 5% off the BOMA measurement: Doreen McClung 560 vs 882 SF; Feldmann Agency 780 vs 1,097 SF; Complete Apartment Care 1,700 vs 2,076 SF; Apex Roofing 1,425 vs 2,469 SF; Retrev Legal 9,874 vs 11,160 SF",
       "impact": "+3,344 SF across these suites",
       "resolution": "Check each lease's remeasurement clause before closing",
+      "source": "computed",
+      "id": "rf-9"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Stale Data",
+      "description": "The rent roll / management report is dated 2025-08-20 (14 months old)",
+      "impact": "Tenants, balances, and vacancy may have changed since",
+      "resolution": "Request a current rent roll and AR aging",
       "source": "computed",
       "id": "rf-10"
     },
@@ -265,7 +268,7 @@
       "resolution": "Review option rent terms",
       "source": "ai_review",
       "sourceDocuments": [
-        "boa_lease.pdf"
+        "boa_lease.txt"
       ],
       "id": "rf-11"
     }
@@ -291,6 +294,7 @@
       "leaseStart": "2021-06-01",
       "leaseExpiry": "2026-05-31",
       "monthsRemaining": -6,
+      "monthToMonth": false,
       "incomeConcentration": 2.8,
       "riskLevel": "HIGH",
       "arStatus": "CURRENT",
@@ -318,6 +322,7 @@
       "leaseStart": "2022-02-01",
       "leaseExpiry": "2027-01-31",
       "monthsRemaining": 2,
+      "monthToMonth": false,
       "incomeConcentration": 3.9,
       "riskLevel": "HIGH",
       "arStatus": "CURRENT",
@@ -346,6 +351,7 @@
       "leaseStart": "2022-02-01",
       "leaseExpiry": "2027-01-31",
       "monthsRemaining": 2,
+      "monthToMonth": false,
       "incomeConcentration": 7.5,
       "riskLevel": "HIGH",
       "arStatus": "CURRENT",
@@ -373,6 +379,7 @@
       "leaseStart": "2020-11-01",
       "leaseExpiry": "2025-10-31",
       "monthsRemaining": -13,
+      "monthToMonth": false,
       "incomeConcentration": 6.1,
       "riskLevel": "HIGH",
       "arStatus": "CURRENT",
@@ -401,6 +408,7 @@
       "leaseStart": "2012-12-01",
       "leaseExpiry": "2028-06-30",
       "monthsRemaining": 19,
+      "monthToMonth": false,
       "incomeConcentration": 35.1,
       "riskLevel": "MEDIUM",
       "arStatus": "CURRENT",
@@ -429,6 +437,7 @@
       "leaseStart": "2019-03-01",
       "leaseExpiry": null,
       "monthsRemaining": null,
+      "monthToMonth": false,
       "incomeConcentration": 44.6,
       "riskLevel": "HIGH",
       "arStatus": "DELINQUENT",
@@ -461,53 +470,64 @@
       "remeasurementRights": false,
       "missingFields": [],
       "confidence": 0.57,
-      "sourceFile": "boa_lease.pdf"
+      "sourceFile": "boa_lease.txt"
     }
   ],
   "documents": [
     {
-      "id": "doc-stirling_aug_2025.pdf",
-      "filename": "stirling_aug_2025.pdf",
+      "id": "doc-1",
+      "filename": "stirling_aug_2025.txt",
       "type": "MANAGEMENT_REPORT",
       "classificationConfidence": 0.95,
       "uploadedAt": "2026-11-05T15:00:00Z",
-      "pageCount": 12,
+      "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
       "note": null
     },
     {
-      "id": "doc-boa_lease.pdf",
-      "filename": "boa_lease.pdf",
+      "id": "doc-2",
+      "filename": "boa_lease.txt",
       "type": "LEASE",
       "classificationConfidence": 0.95,
       "uploadedAt": "2026-11-05T15:00:00Z",
-      "pageCount": 45,
+      "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
       "note": null
     },
     {
-      "id": "doc-boma_measurements.xlsx",
-      "filename": "boma_measurements.xlsx",
+      "id": "doc-3",
+      "filename": "boma_measurements.csv",
       "type": "BOMA",
       "classificationConfidence": 0.95,
       "uploadedAt": "2026-11-05T15:00:00Z",
-      "pageCount": 2,
+      "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
       "note": null
     },
     {
-      "id": "doc-escambia_pa.png",
-      "filename": "escambia_pa.png",
+      "id": "doc-4",
+      "filename": "escambia_pa.txt",
       "type": "COUNTY_PA",
       "classificationConfidence": 0.95,
       "uploadedAt": "2026-11-05T15:00:00Z",
       "pageCount": 1,
-      "ocr": true,
+      "ocr": false,
       "status": "PROCESSED",
       "note": null
+    },
+    {
+      "id": "doc-5",
+      "filename": "site_photo_notes.txt",
+      "type": "OTHER",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-09T17:24:34.951522+00:00",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "SKIPPED",
+      "note": "Not a supported document type"
     }
   ],
   "arithmeticChecks": [
@@ -519,7 +539,7 @@
       "deltaPct": 0.0,
       "formula": "sum(tenant RSF) + vacant RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent roll occupied RSF",
@@ -529,7 +549,7 @@
       "deltaPct": 0.0,
       "formula": "sum(occupied tenant RSF)",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent roll total annual rent",
@@ -539,7 +559,7 @@
       "deltaPct": 0.0,
       "formula": "sum(tenant annual base rent)",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent roll occupancy",
@@ -549,7 +569,7 @@
       "deltaPct": 0.0,
       "formula": "occupied RSF \u00f7 total RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Doreen McClung",
@@ -559,7 +579,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Doreen McClung",
@@ -569,7 +589,7 @@
       "deltaPct": 0.0,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Feldmann Agency",
@@ -579,7 +599,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Feldmann Agency",
@@ -589,7 +609,7 @@
       "deltaPct": 0.03,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Complete Apartment Care",
@@ -599,7 +619,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Complete Apartment Care",
@@ -609,7 +629,7 @@
       "deltaPct": 0.01,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Apex Roofing",
@@ -619,7 +639,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Apex Roofing",
@@ -629,7 +649,7 @@
       "deltaPct": 0.01,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Bank of America",
@@ -639,7 +659,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Bank of America",
@@ -649,7 +669,7 @@
       "deltaPct": 0.0,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Annual rent \u2014 Retrev Legal",
@@ -659,7 +679,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Rent PSF \u2014 Retrev Legal",
@@ -669,7 +689,7 @@
       "deltaPct": 0.01,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Lease annual rent \u2014 Bank of America, National Association",
@@ -679,7 +699,7 @@
       "deltaPct": 0.0,
       "formula": "monthly rent \u00d7 12",
       "detail": null,
-      "source": "boa_lease.pdf"
+      "source": "boa_lease.txt"
     },
     {
       "label": "Lease rent PSF \u2014 Bank of America, National Association",
@@ -689,7 +709,7 @@
       "deltaPct": 0.0,
       "formula": "annual rent \u00f7 RSF",
       "detail": null,
-      "source": "boa_lease.pdf"
+      "source": "boa_lease.txt"
     },
     {
       "label": "BOMA suites vs building total",
@@ -699,7 +719,7 @@
       "deltaPct": 4.14,
       "formula": "sum(suite rentable SF)",
       "detail": "Stated 29,451.52 SF, computed 28,232.20 SF (4.1% off). Remaining area may be unlisted suites or building common area.",
-      "source": "boma_measurements.xlsx"
+      "source": "boma_measurements.csv"
     },
     {
       "label": "NOI (period)",
@@ -709,7 +729,7 @@
       "deltaPct": 0.0,
       "formula": "total revenue \u2212 operating expenses",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     },
     {
       "label": "Bank reconciliation",
@@ -719,7 +739,7 @@
       "deltaPct": null,
       "formula": "bank balance \u2212 GL balance",
       "detail": null,
-      "source": "stirling_aug_2025.pdf"
+      "source": "stirling_aug_2025.txt"
     }
   ],
   "expirySchedule": [

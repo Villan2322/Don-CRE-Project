@@ -25,6 +25,7 @@ RSF_NOTICE_PCT = 2.0         # smaller gaps are noted, not alerted
 CONCENTRATION_PCT = 25.0     # single-tenant share of rent that counts as concentration
 NEAR_TERM_MONTHS = 12        # expirations inside this window are near-term rollover
 CHECK_PASS_PCT = 1.0         # arithmetic checks within 1% pass
+STALE_MONTHS = 3
 CHECK_WARN_PCT = 5.0         # 1-5% is a warning, over 5% fails
 
 RENT_ROLL_TYPES = ("RENT_ROLL", "RENT_ROLL_XLSX")
@@ -119,6 +120,10 @@ def months_until(target: date, today: date) -> int:
     return months
 
 
+def money(x: float) -> str:
+    return f"${x:,.0f}"
+
+
 def round_or_none(x: Optional[float], digits: int = 2) -> Optional[float]:
     return None if x is None else round(x, digits)
 
@@ -199,6 +204,7 @@ class TenantRecord:
     rr_monthly: Optional[float] = None
     rr_psf: Optional[float] = None
     rr_status: Optional[str] = None
+    month_to_month: bool = False
     ar_balance: Optional[float] = None
     ar_over_60: Optional[float] = None
     ar_over_90: Optional[float] = None
@@ -266,6 +272,7 @@ class Sources:
     rent_roll_rows: list[dict]
     rent_roll_summary: dict
     rent_roll_file: Optional[str]
+    rent_roll_date: Optional[date]
     leases: list[LeaseRecord]
     boma_suites: list[dict]
     boma_totals: dict
@@ -283,6 +290,7 @@ def collect_sources(extractions: list[dict]) -> Sources:
     rr_rows: list[dict] = []
     rr_summary: dict = {}
     rr_file = None
+    rr_date: Optional[date] = None
     mgmt_rows: list[dict] = []
     mgmt_summary: dict = {}
     leases: list[LeaseRecord] = []
@@ -310,6 +318,7 @@ def collect_sources(extractions: list[dict]) -> Sources:
             rows = data.get("tenants") or []
             if len(rows) > len(rr_rows):  # use the fullest rent roll if several were uploaded
                 rr_rows, rr_summary, rr_file = rows, data.get("summary") or {}, filename
+                rr_date = parse_date(data.get("as_of_date"))
         elif doc_type == "LEASE":
             leases.append(_lease_from_extraction(data, filename, ext.get("missing_fields", [])))
         elif doc_type == "LEASE_ABSTRACT":
@@ -332,9 +341,10 @@ def collect_sources(extractions: list[dict]) -> Sources:
     # A management report's rent roll stands in when no separate rent roll was uploaded.
     if not rr_rows and mgmt_rows:
         rr_rows, rr_summary, rr_file = mgmt_rows, mgmt_summary, mgmt_file
+        rr_date = parse_date(mgmt.get("report_date"))
         present.add("RENT_ROLL")
 
-    return Sources(present, rr_rows, rr_summary, rr_file, leases, boma_suites, boma_totals,
+    return Sources(present, rr_rows, rr_summary, rr_file, rr_date, leases, boma_suites, boma_totals,
                    boma_file, ar_entries, mgmt, mgmt_file, model, county, failed)
 
 
@@ -373,6 +383,29 @@ def _find_tenant(tenants: list[TenantRecord], name: Optional[str], suite: Option
     return matches[0] if len(matches) == 1 else None
 
 
+_LANDLORD_USE = re.compile(
+    r"\b(maintenance|storage room|janitor|mechanical|electrical|boiler|elevator|management office|"
+    r"mgmt\.? office|leasing office|common area|restrooms?)\b", re.I)
+_MONTH_TO_MONTH = re.compile(r"\b(mtm|m-t-m|month[\s-]*to[\s-]*month|mo\.?\s*to\s*mo\.?)\b", re.I)
+
+
+def _is_landlord_use(row: dict) -> bool:
+    """Space the landlord keeps for itself (maintenance, storage, management office): not leased, not vacant."""
+    if val(row.get("is_landlord_use")) is True:
+        return True
+    name = text(row.get("tenant_name")) or ""
+    rent = num(row.get("monthly_base_rent")) or num(row.get("annual_base_rent"))
+    return bool(_LANDLORD_USE.search(name)) and not rent and not name.lower().startswith("vacant")
+
+
+def _is_month_to_month(row: dict) -> bool:
+    return any(_MONTH_TO_MONTH.search(str(val(row.get(k)) or "")) for k in ("status", "lease_end"))
+
+
+def tenant_key(name: str) -> str:
+    return " ".join(sorted(name_tokens(name))) or name.lower()
+
+
 def _is_vacant(row: dict) -> bool:
     if val(row.get("is_vacant")) is True:
         return True
@@ -391,8 +424,12 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
     tenants: list[TenantRecord] = []
     vacant_rsf = 0.0
     vacant_suites: list[str] = []
+    landlord_use: list[dict] = []
     for row in src.rent_roll_rows:
         rsf = num(row.get("rsf"))
+        if _is_landlord_use(row):
+            landlord_use.append({"suite": text(row.get("suite")), "name": text(row.get("tenant_name")), "rsf": rsf})
+            continue
         if _is_vacant(row):
             vacant_rsf += rsf or 0
             if text(row.get("suite")):
@@ -404,6 +441,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
             rr_start=parse_date(row.get("lease_start")), rr_end=parse_date(row.get("lease_end")),
             rr_annual=num(row.get("annual_base_rent")), rr_monthly=num(row.get("monthly_base_rent")),
             rr_psf=num(row.get("rent_psf")), rr_status=text(row.get("status")),
+            month_to_month=_is_month_to_month(row),
             ar_balance=num(row.get("ar_balance")), ar_over_60=num(row.get("ar_over_60")),
             ar_over_90=num(row.get("ar_over_90")), sources=["rent_roll"],
         ))
@@ -462,6 +500,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
         if lease and lease.end and t.rr_end and abs((lease.end - t.rr_end).days) > 31:
             conflicts.append({"tenant": t.name, "lease_end": lease.end.isoformat(),
                               "rent_roll_end": t.rr_end.isoformat(), "lease_file": lease.filename})
+        mtm = t.month_to_month and not (lease and lease.end)
         months = months_until(expiry, today) if expiry else None
         if months is None or months <= NEAR_TERM_MONTHS:
             risk = "HIGH"
@@ -494,6 +533,7 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
             "leaseStart": start.isoformat() if start else None,
             "leaseExpiry": expiry.isoformat() if expiry else None,
             "monthsRemaining": months,
+            "monthToMonth": mtm,
             "incomeConcentration": 0.0,  # filled once the total is known
             "riskLevel": risk,
             "arStatus": ar_status,
@@ -572,6 +612,23 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
 
     checks = _arithmetic_checks(src, leases, rows, occupied_rsf, vacant_rsf, total_rent, src.mgmt)
 
+    doc_dates = [d for d in (src.rent_roll_date, parse_date(src.mgmt.get("report_date"))) if d]
+    data_as_of = max(doc_dates) if doc_dates else None
+    collection = src.mgmt.get("collection_summary") or {}
+    contract_monthly = sum(r["monthlyRent"] for r in rows) if has_rent_roll else None
+    billed_monthly = num(collection.get("billed_minimum_rent"))
+    if billed_monthly is not None and contract_monthly:
+        billing = _check("Contract rent vs billed rent", contract_monthly, billed_monthly,
+                         "minimum rent billed this period vs sum of monthly contract rent",
+                         src.mgmt_file or "management report", "$")
+        if billing:
+            billing["kind"] = "billing"
+            if billing["status"] != "pass":
+                gap = contract_monthly - billed_monthly
+                billing["detail"] = (f"Leases call for {money(contract_monthly)}/mo; {money(billed_monthly)} was billed "
+                                     f"({'short' if gap > 0 else 'over'} {money(abs(gap))}, {billing['deltaPct']:.1f}%)")
+            checks.append(billing)
+
     property_address = (text(src.mgmt.get("property_address")) or text(src.county.get("property_address"))
                         or next((l.premises_address for l in leases if l.premises_address), None))
 
@@ -598,6 +655,11 @@ def compute_metrics(extractions: list[dict], as_of: Optional[date] = None) -> di
             "arDelinquency": round(sum(r["arOver60"] for r in rows), 2),
             "camRecoveryRatio": num(src.mgmt.get("cam_recovery_ratio_pct")),
         },
+        "has_ar_aging": any(num(e.get(k)) is not None for e in src.ar_entries for k in ("over_60_days", "over_90_days"))
+            or any(num(r.get(k)) is not None for r in src.rent_roll_rows for k in ("ar_over_60", "ar_over_90")),
+        "data_as_of": data_as_of.isoformat() if data_as_of else None,
+        "data_age_months": months_until(today, data_as_of) if data_as_of else None,
+        "landlord_use": landlord_use,
         "has_ar_data": bool(src.ar_entries) or any(
             num(r.get(k)) is not None for r in src.rent_roll_rows for k in ("ar_balance", "ar_over_60", "ar_over_90")),
         "walt_months": round(walt, 1) if walt is not None else None,
@@ -777,6 +839,11 @@ def score_deal(m: dict, documents_uploaded: int, documents_extracted: int) -> di
         reasons.append({"text": "No stated totals to verify", "earned": False, "points": 0})
     if rows and not m["has_ar_data"]:
         reasons.append({"text": "No receivables data — collections can't be verified", "earned": False, "points": 0})
+    elif rows and not m["has_ar_aging"]:
+        open_bal = sum(r["arBalance"] for r in rows)
+        pts += 3
+        reasons.append({"text": f"{money(open_bal)} in open balances, but not aged — can't tell what's past due",
+                        "earned": False, "points": 3})
     elif rows:
         delinquent = fin["arDelinquency"]
         share = delinquent / total_rent * 100 if total_rent else 0
@@ -808,7 +875,7 @@ def score_deal(m: dict, documents_uploaded: int, documents_extracted: int) -> di
         p = max(0, 6 - 2 * len(risky))
         pts += p
         reasons.append({"text": "No expired, expiring, or undated leases" if not risky
-                        else f"{len(risky)} tenant(s) expired, expiring within 12 months, or undated",
+                        else f"{len(risky)} tenant(s) expired, expiring within 12 months, month-to-month, or undated",
                         "earned": not risky, "points": p})
     lease_cat = _cat(pts, 20, reasons)
 
@@ -822,11 +889,10 @@ def score_deal(m: dict, documents_uploaded: int, documents_extracted: int) -> di
     else:
         reasons.append({"text": "Vacancy unknown", "earned": False, "points": 0})
     if rows:
-        top = max(rows, key=lambda r: r["incomeConcentration"])
-        share = top["incomeConcentration"]
+        top_name, share = max(tenant_shares(rows).items(), key=lambda kv: kv[1])
         p = 7 if share <= CONCENTRATION_PCT else 4 if share <= 40 else 1
         pts += p
-        reasons.append({"text": f"Largest tenant {top['name']} is {share:.0f}% of rent",
+        reasons.append({"text": f"Largest tenant {top_name} is {share:.0f}% of rent",
                         "earned": share <= CONCENTRATION_PCT, "points": p})
     risk_cat = _cat(pts, 15, reasons)
 
@@ -850,6 +916,17 @@ def score_deal(m: dict, documents_uploaded: int, documents_extracted: int) -> di
     overall = round(min(100, sum(c["points"] for c in categories.values())))
     tier, readiness = tier_for(overall)
     return {"overall": overall, "tier": tier, "dealReadiness": readiness, "categories": categories}
+
+
+def tenant_shares(rows: list[dict]) -> dict[str, float]:
+    """Share of rent per tenant, adding up tenants that lease more than one suite."""
+    names: dict[str, str] = {}
+    shares: dict[str, float] = {}
+    for r in rows:
+        key = tenant_key(r["name"])
+        names.setdefault(key, r["name"])
+        shares[key] = shares.get(key, 0) + r["incomeConcentration"]
+    return {names[k]: round(v, 1) for k, v in shares.items()}
 
 
 def tier_for(score: float) -> tuple[str, str]:
@@ -885,33 +962,69 @@ def computed_red_flags(m: dict) -> list[dict]:
              else "Tenants may be billed on more area than was measured"),
             "Confirm which measurement the leases reference; request remeasurement or adjust pricing")
 
+    # Group suites by tenant so a tenant in three suites gets one flag, not three.
+    groups: dict[str, list[dict]] = {}
     for r in rows:
-        share = f"{r['incomeConcentration']:.0f}% of rent"
-        if r["monthsRemaining"] is None:
-            add("HIGH", "Missing Expiry", f"{r['name']} ({suite_label(r['suite'])}) has no documented expiration",
+        groups.setdefault(tenant_key(r["name"]), []).append(r)
+
+    def where(g: list[dict]) -> str:
+        return ", ".join(suite_label(r["suite"]) for r in g)
+
+    mtm, undated, lapsed = [], [], []
+    data_as_of = m.get("data_as_of")
+    for g in groups.values():
+        name = g[0]["name"]
+        pct = sum(r["incomeConcentration"] for r in g)
+        share = f"{pct:.0f}% of rent"
+        if all(r["monthToMonth"] for r in g):
+            mtm.append((name, pct))
+        elif any(r["monthsRemaining"] is None and not r["monthToMonth"] for r in g):
+            undated.append(name)
+            add("HIGH", "Missing Expiry", f"{name} ({where(g)}) has no documented expiration",
                 f"Rollover risk can't be assessed for {share}",
-                f"Request the executed lease and any amendments for {r['name']}")
-        elif r["monthsRemaining"] < 0:
-            add("HIGH", "Expired Lease",
-                f"{r['name']} lease expired {r['leaseExpiry']} ({abs(r['monthsRemaining'])} months ago)",
-                f"{share} may be month-to-month or holding over",
-                f"Request any renewal or extension for {r['name']}, or price in the vacancy")
-        elif r["monthsRemaining"] <= NEAR_TERM_MONTHS:
-            add("MEDIUM", "Near-term Expiry",
-                f"{r['name']} expires {r['leaseExpiry']} ({r['monthsRemaining']} months)",
-                f"{share} rolls within a year of today",
-                f"Ask about renewal status with {r['name']}")
-        if r["arStatus"] == "DELINQUENT":
-            note = f" — {r['arNote']}" if r.get("arNote") else ""
-            add("HIGH" if r["arOver60"] >= r["monthlyRent"] else "MEDIUM", "AR Delinquency",
-                f"{r['name']} has ${r['arOver60']:,.0f} past due 60+ days{note}",
+                f"Request the executed lease and any amendments for {name}")
+        else:
+            dated = [r for r in g if r["monthsRemaining"] is not None]
+            soonest = min(dated, key=lambda r: r["monthsRemaining"]) if dated else None
+            if soonest and soonest["monthsRemaining"] < 0 and data_as_of and soonest["leaseExpiry"] > data_as_of:
+                lapsed.append((name, soonest["leaseExpiry"], pct))
+            elif soonest and soonest["monthsRemaining"] < 0:
+                add("HIGH", "Expired Lease",
+                    f"{name} lease expired {soonest['leaseExpiry']} ({abs(soonest['monthsRemaining'])} months ago)",
+                    f"{share} may be month-to-month or holding over",
+                    f"Request any renewal or extension for {name}, or price in the vacancy")
+            elif soonest and soonest["monthsRemaining"] <= NEAR_TERM_MONTHS:
+                add("MEDIUM", "Near-term Expiry",
+                    f"{name} expires {soonest['leaseExpiry']} ({soonest['monthsRemaining']} months)",
+                    f"{share} rolls within a year of today",
+                    f"Ask about renewal status with {name}")
+        over60 = sum(r["arOver60"] for r in g)
+        if any(r["arStatus"] == "DELINQUENT" for r in g):
+            note = next((f" — {r['arNote']}" for r in g if r.get("arNote")), "")
+            add("HIGH" if over60 >= sum(r["monthlyRent"] for r in g) else "MEDIUM", "AR Delinquency",
+                f"{name} has ${over60:,.0f} past due 60+ days{note}",
                 f"Collection risk on {share}",
                 "Request payment history and confirm the balance with management")
-        if r["incomeConcentration"] > CONCENTRATION_PCT and total_rent:
-            add("MEDIUM", "Tenant Concentration", f"{r['name']} pays {share}",
+        if pct > CONCENTRATION_PCT and total_rent:
+            add("MEDIUM", "Tenant Concentration",
+                f"{name} pays {share}" + (f" across {len(g)} suites" if len(g) > 1 else ""),
                 "Loss of this tenant would materially cut income",
-                f"Review {r['name']}'s credit, guarantor, and renewal options")
+                f"Review {name}'s credit, guarantor, and renewal options")
 
+    if lapsed:
+        lapsed.sort(key=lambda t: t[1])
+        names = ", ".join(f"{n} ({e})" for n, e, _ in lapsed[:6]) + (f" and {len(lapsed) - 6} more" if len(lapsed) > 6 else "")
+        add("HIGH", "Expired Since Report",
+            f"{len(lapsed)} lease(s) ran out after the {data_as_of} report: {names}",
+            f"{sum(p for _, _, p in lapsed):.0f}% of rent — renewed, holding over, or gone is unknown",
+            "Request a current rent roll and any renewals signed since the report")
+    if mtm:
+        mtm.sort(key=lambda t: -t[1])
+        names = ", ".join(n for n, _ in mtm[:6]) + (f" and {len(mtm) - 6} more" if len(mtm) > 6 else "")
+        add("MEDIUM", "Month-to-Month",
+            f"{len(mtm)} tenant(s) are month-to-month: {names}",
+            f"{sum(p for _, p in mtm):.0f}% of rent can leave on 30 days' notice",
+            "Ask which are negotiating renewals; price these as near-term rollover")
     off = [r for r in rows if r["rsfDelta"] is not None and r["rsf"]
            and abs(r["rsfDelta"]) / r["rsf"] * 100 > RSF_ALERT_PCT]
     if off:
@@ -930,9 +1043,23 @@ def computed_red_flags(m: dict) -> list[dict]:
         add("LOW", "Lease Not on Rent Roll", f"Lease for {o['tenant'] or 'a tenant'} ({o['file']}) has no rent roll row",
             "May be a former tenant or a missing rent roll entry", "Confirm whether this tenant is in occupancy")
     for c in m["arithmetic_checks"]:
-        if c["status"] == "fail":
+        if c["status"] == "pass":
+            continue
+        if c.get("kind") == "billing":
+            add("HIGH" if c["status"] == "fail" else "MEDIUM", "Contract vs Billed Rent", c["detail"],
+                "Could be free rent, abatements, percentage-rent tenants, or tenants not being billed",
+                "Ask management to tie each lease's contract rent to what was billed and collected")
+        elif c["status"] == "fail":
             add("MEDIUM", "Arithmetic Mismatch", f"{c['label']}: {c['detail']}",
                 f"Figures in {c['source']} don't add up", "Ask management to reconcile the stated figure")
+    age = m.get("data_age_months")
+    if age is not None and age > STALE_MONTHS:
+        add("MEDIUM", "Stale Data", f"The rent roll / management report is dated {m['data_as_of']} ({age} months old)",
+            "Tenants, balances, and vacancy may have changed since", "Request a current rent roll and AR aging")
+    if m.get("landlord_use"):
+        spaces = ", ".join(f"{x['name']} ({suite_label(x['suite'])})" for x in m["landlord_use"][:5])
+        add("LOW", "Landlord-Use Space", f"Not counted as tenants or vacancy: {spaces}",
+            "These spaces earn no rent; check whether any could be leased", "Confirm their area and use with management")
     for f in m["failed_extractions"]:
         add("LOW", "Unread Document", f"{f['filename']} could not be extracted",
             "Its data is missing from this analysis", "Re-upload a clearer or text-based copy")
@@ -945,9 +1072,13 @@ def computed_red_flags(m: dict) -> list[dict]:
 def what_to_get_next(m: dict, synthesis_items: list[Any]) -> list[str]:
     present = set(m["present_types"])
     items: list[str] = []
+    seen: set[str] = set()
     for r in m["tenants"]:
-        if r["monthsRemaining"] is None:
+        if r["monthsRemaining"] is None and not r["monthToMonth"] and tenant_key(r["name"]) not in seen:
+            seen.add(tenant_key(r["name"]))
             items.append(f"Executed lease for {r['name']} — no expiration on file ({r['incomeConcentration']:.0f}% of rent)")
+    if any(r["monthToMonth"] for r in m["tenants"]):
+        items.append("Status of month-to-month tenants — who is renewing, who is leaving")
     for key, label, types in CORE_DOC_GROUPS:
         has = bool(present & set(types)) or (key == "rent_roll" and m["has_rent_roll"])
         if not has:
@@ -955,9 +1086,8 @@ def what_to_get_next(m: dict, synthesis_items: list[Any]) -> list[str]:
     no_lease = [r["name"] for r in m["tenants"] if not r["hasLease"] and r["monthsRemaining"] is not None]
     if no_lease and ("LEASE" in present or "LEASE_ABSTRACT" in present):
         items.append(f"Leases for {', '.join(no_lease[:4])}{' and others' if len(no_lease) > 4 else ''}")
-    if m["tenants"] and not any("ar_aging" in r["sources"] for r in m["tenants"]) \
-            and not any(r["arOver60"] for r in m["tenants"]):
-        items.append("AR aging report — confirms collections by tenant")
+    if m["tenants"] and not m["has_ar_aging"]:
+        items.append("AR aging report — shows which balances are 30, 60, 90+ days past due")
 
     for item in synthesis_items or []:
         if isinstance(item, dict):
@@ -1097,6 +1227,9 @@ def build_report(*, deal_id: str, deal_name: str, classified_documents: list[dic
         "propertyAddress": text(synthesis.get("property_address")) or m["property_address"] or "",
         "submittedAt": completed_at,
         "asOf": m["as_of"],
+        "dataAsOf": m["data_as_of"],
+        "dataAgeMonths": m["data_age_months"],
+        "landlordUseSpaces": m["landlord_use"],
         "score": score["overall"],
         "tier": score["tier"],
         "dealReadiness": score["dealReadiness"],

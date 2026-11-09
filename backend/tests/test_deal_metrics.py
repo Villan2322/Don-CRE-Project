@@ -184,7 +184,8 @@ def test_red_flags_cover_the_known_problems(report):
     cats = [f["category"] for f in report["redFlags"]]
     assert "RSF Discrepancy" in cats
     assert "Missing Expiry" in cats
-    assert cats.count("Expired Lease") == 2
+    lapsed = next(f for f in report["redFlags"] if f["category"] == "Expired Since Report")
+    assert lapsed["description"].startswith("2 lease(s) ran out after the 2025-08-20 report")
     assert "AR Delinquency" in cats
     assert cats.count("Suite RSF Variance") == 1  # consolidated
     severities = [f["severity"] for f in report["redFlags"]]
@@ -252,3 +253,95 @@ def test_a_thin_package_does_not_outscore_the_full_one(report):
     fin_reasons = [r["text"] for r in thin["scoreBreakdown"]["financialIntegrity"]["reasons"]]
     assert "No receivables data — collections can't be verified" in fin_reasons
     assert thin["scoreBreakdown"]["rsfAlignment"]["points"] <= 10
+
+
+# ── shopping-center package (Town & Country shape) ───────────────────────────
+
+def _row(name, suite, rsf=None, monthly=None, end=None, status="Current", **extra):
+    return {"tenant_name": name, "suite": suite, "rsf": rsf, "monthly_base_rent": monthly,
+            "annual_base_rent": monthly * 12 if monthly else None, "lease_end": end, "status": status, **extra}
+
+
+def _center(collection=None, report_date="2026-10-31", aged=False):
+    ar = {"ar_balance": 900.0}
+    if aged:
+        ar.update(ar_over_60=0.0, ar_over_90=0.0)
+    rows = [
+        _row("Early Learning Coalition", "100", 4000, 8000, "2030-01-31", **ar),
+        _row("Early Learning Coalition", "110", 3000, 6000, "2030-01-31"),
+        _row("Nail Spa", "120", 1200, 2000, status="MTM"),
+        _row("Mars Caribbean", "130", 1500, 2500),
+        _row("BUILDING MAINTENANCE ROOM", "L8"),
+        _row("BUILDING STORAGE ROOM", "L10", 275),
+        _row("VACANT", "140", 2000, is_vacant=True),
+    ]
+    data = {"report_date": report_date, "rent_roll": rows}
+    if collection:
+        data["collection_summary"] = collection
+    return compute_metrics([extraction("MANAGEMENT_REPORT", "tc.pdf", data)], as_of=TODAY)
+
+
+def _flags(m):
+    return build_report(deal_id="d", deal_name="TC", classified_documents=[], extractions=[], ingest_errors=[],
+                        metrics=m, synthesis=None, pipeline_errors=[], files_uploaded=1,
+                        completed_at="2026-11-05T12:00:00Z")
+
+
+def test_landlord_rooms_are_not_tenants_or_vacancy():
+    m = _center()
+    names = [t["name"] for t in m["tenants"]]
+    assert "BUILDING MAINTENANCE ROOM" not in names and "BUILDING STORAGE ROOM" not in names
+    assert m["vacant_rsf"] == 2000
+    assert {x["suite"] for x in m["landlord_use"]} == {"L8", "L10"}
+
+
+def test_month_to_month_is_one_medium_flag_not_missing_expiry():
+    r = _flags(_center())
+    missing = [f for f in r["redFlags"] if f["category"] == "Missing Expiry"]
+    assert [f["description"].split(" (")[0] for f in missing] == ["Mars Caribbean"]
+    mtm = [f for f in r["redFlags"] if f["category"] == "Month-to-Month"]
+    assert len(mtm) == 1 and mtm[0]["severity"] == "MEDIUM" and "Nail Spa" in mtm[0]["description"]
+    assert not any("Nail Spa" in item for item in r["whatToGetNext"] if item.startswith("Executed lease"))
+
+
+def test_tenant_in_two_suites_is_one_concentration_flag():
+    r = _flags(_center())
+    conc = [f for f in r["redFlags"] if f["category"] == "Tenant Concentration"]
+    assert len(conc) == 1 and "2 suites" in conc[0]["description"]
+    risk = r["scoreBreakdown"]["riskProfile"]["reasons"]
+    assert any("Early Learning Coalition is 76%" in x["text"] for x in risk)
+
+
+def test_unaged_balances_do_not_earn_full_ar_points():
+    unaged = _flags(_center())["scoreBreakdown"]["financialIntegrity"]["reasons"]
+    assert any("not aged" in x["text"] and x["points"] == 3 for x in unaged)
+    aged = _flags(_center(aged=True))["scoreBreakdown"]["financialIntegrity"]["reasons"]
+    assert any(x["text"] == "No 60+ day receivables" and x["points"] == 8 for x in aged)
+
+
+def test_billed_rent_short_of_contract_is_flagged_as_billing_gap():
+    m = _center(collection={"billed_minimum_rent": 15000})
+    check = next(c for c in m["arithmetic_checks"] if c["label"] == "Contract rent vs billed rent")
+    assert check["status"] == "fail" and "short $3,500" in check["detail"]
+    flag = next(f for f in _flags(m)["redFlags"] if f["category"] == "Contract vs Billed Rent")
+    assert "abatement" in flag["impact"]
+    assert not any(f["category"] == "Arithmetic Mismatch" for f in _flags(m)["redFlags"])
+
+
+def test_report_date_and_stale_data():
+    fresh = _flags(_center())
+    assert fresh["dataAsOf"] == "2026-10-31"
+    assert not any(f["category"] == "Stale Data" for f in fresh["redFlags"])
+    old = _flags(_center(report_date="2026-02-28"))
+    assert old["dataAgeMonths"] >= 8
+    assert any(f["category"] == "Stale Data" for f in old["redFlags"])
+
+
+def test_leases_that_lapsed_after_the_report_are_grouped():
+    m = _center(report_date="2026-02-28")
+    m["tenants"][0]["leaseExpiry"], m["tenants"][0]["monthsRemaining"] = "2026-06-30", -5
+    m["tenants"][1]["leaseExpiry"], m["tenants"][1]["monthsRemaining"] = "2026-06-30", -5
+    flags = _flags(m)["redFlags"]
+    lapsed = [f for f in flags if f["category"] == "Expired Since Report"]
+    assert len(lapsed) == 1 and "Early Learning Coalition (2026-06-30)" in lapsed[0]["description"]
+    assert not any(f["category"] == "Expired Lease" for f in flags)

@@ -79,6 +79,7 @@ export interface Tenant {
   leaseStart: string | null
   leaseExpiry: string | null
   monthsRemaining: number | null
+  monthToMonth: boolean
   incomeConcentration: number
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
   arStatus: 'CURRENT' | 'DELINQUENT' | 'AT_RISK'
@@ -155,6 +156,9 @@ export interface DealAnalysis {
   propertyAddress: string
   submittedAt: string
   asOf: string
+  dataAsOf: string | null
+  dataAgeMonths: number | null
+  landlordUseSpaces: { suite: string | null; name: string | null; rsf: number | null }[]
   score: number
   tier: Tier
   dealReadiness: DealReadiness

@@ -45,6 +45,12 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
         <div className="min-w-0">
           <h2 className="text-2xl font-semibold text-balance">{deal.dealName}</h2>
           {deal.propertyAddress && <p className="mt-1 text-sm text-muted-foreground">{deal.propertyAddress}</p>}
+          {deal.dataAsOf && (
+            <p className={cn('mt-1 text-xs', (deal.dataAgeMonths ?? 0) > 3 ? 'text-warning' : 'text-muted-foreground')}>
+              Rent roll dated {new Date(deal.dataAsOf + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {(deal.dataAgeMonths ?? 0) > 3 && ` — ${deal.dataAgeMonths} months old`}
+            </p>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <div className="text-5xl font-bold tabular-nums">{deal.score}</div>

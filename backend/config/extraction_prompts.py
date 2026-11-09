@@ -26,6 +26,8 @@ Rules:
 - Numbers are plain JSON numbers: no $, commas, % signs, or units (10508, not "10,508 SF").
 - Percentages are numbers on a 0-100 scale (3.5 for 3.5%).
 - Dates are YYYY-MM-DD. If only month and year are given, use the first of the month.
+- In tables, read each row on its own. If a cell is blank, return null for it — never copy a value
+  from the row above or below, and never fill a blank from a total.
 """
 
 
@@ -76,6 +78,8 @@ RENT_ROLL_TENANT = {
     "tenant_name": "string (use 'VACANT' for vacant suites)",
     "suite": "string",
     "is_vacant": "boolean",
+    "is_landlord_use": "boolean — true for space the landlord keeps (maintenance room, storage room, "
+                       "management or leasing office) that is not leased to a tenant",
     "rsf": "number",
     "lease_start": "string (YYYY-MM-DD)",
     "lease_end": "string (YYYY-MM-DD) or null if blank / month-to-month",
@@ -247,6 +251,13 @@ EXTRACTION_CONFIGS: dict[str, ExtractionConfig] = {
                 "over_90_days": "number",
                 "note": "string",
             }],
+            "collection_summary": {
+                "billed_minimum_rent": "number — total base/minimum rent billed this period, from the "
+                                       "billing or collection report",
+                "total_billed": "number — all charges billed this period",
+                "total_collected": "number — total paid this period",
+                "total_unpaid": "number — total still owed",
+            },
             "tenant_updates": ["string"],
         },
         "max_tokens": 32000,

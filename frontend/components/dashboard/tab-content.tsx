@@ -236,7 +236,7 @@ function LeaseAuditTab({ deal }: { deal: DealAnalysis }) {
                       near && !expired && 'text-warning'
                     )}
                   >
-                    {unknown ? 'Expiry unknown' : `${monthYear(t.leaseExpiry)} · ${term(t.monthsRemaining)}`}
+                    {unknown ? (t.monthToMonth ? 'Month-to-month' : 'Expiry unknown') : `${monthYear(t.leaseExpiry)} · ${term(t.monthsRemaining)}`}
                   </p>
                   <p className="text-xs text-muted-foreground">{money(t.annualRent)}/yr</p>
                 </div>
