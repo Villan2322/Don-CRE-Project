@@ -40,10 +40,10 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
   const keys = Object.keys(LABELS) as ScoreCategoryKey[]
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-6">
+    <div className="rounded-lg border border-border bg-card p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-2xl font-semibold text-balance">{deal.dealName}</h2>
+          <h2 className="text-xl font-bold uppercase tracking-tight text-balance md:text-2xl">{deal.dealName}</h2>
           {deal.propertyAddress && <p className="mt-1 text-sm text-muted-foreground">{deal.propertyAddress}</p>}
           {deal.dataAsOf && (
             <p className={cn('mt-1 text-xs', (deal.dataAgeMonths ?? 0) > 3 ? 'text-warning' : 'text-muted-foreground')}>
@@ -53,11 +53,11 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
           )}
         </div>
         <div className="shrink-0 text-right">
-          <div className="text-5xl font-bold tabular-nums">{deal.score}</div>
+          <div className="text-5xl font-bold tabular-nums text-brand-navy">{deal.score}</div>
           <div className="text-sm text-muted-foreground">/ 100</div>
         </div>
       </div>
-      <div className={cn('mt-4 inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium', TIER_STYLE[deal.tier])}>
+      <div className={cn('mt-4 inline-flex items-center border px-3 py-1 text-xs font-semibold uppercase tracking-wider', TIER_STYLE[deal.tier])}>
         {deal.tier} — {deal.dealReadiness}
       </div>
       {deal.executiveSummary && !detailed && (
@@ -77,8 +77,8 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
                     {cat.points}/{cat.max}
                   </span>
                 </div>
-                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary">
-                  <div className={cn('h-full rounded-full', barColor(pct))} style={{ width: `${pct}%` }} />
+                <div className="mt-1.5 h-1.5 overflow-hidden bg-secondary">
+                  <div className={cn('h-full', barColor(pct))} style={{ width: `${pct}%` }} />
                 </div>
               </div>
             )
@@ -97,8 +97,8 @@ export function ScoreCard({ deal, detailed = false }: { deal: DealAnalysis; deta
                     {cat.points} / {cat.max}
                   </span>
                 </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-                  <div className={cn('h-full rounded-full', barColor(pct))} style={{ width: `${pct}%` }} />
+                <div className="mt-2 h-1.5 overflow-hidden bg-secondary">
+                  <div className={cn('h-full', barColor(pct))} style={{ width: `${pct}%` }} />
                 </div>
                 <ul className="mt-3 space-y-1.5">
                   {cat.reasons.map((r, i) => (

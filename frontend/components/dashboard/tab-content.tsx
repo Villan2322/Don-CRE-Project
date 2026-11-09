@@ -104,9 +104,10 @@ function Notices({ deal, onUpload }: { deal: DealAnalysis; onUpload: () => void 
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-6">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+    <div>
+      <h2 className="text-2xl md:text-[28px]">{title}</h2>
+      <div className="mt-2 h-[3px] w-12 bg-gold" />
+      <p className="mt-3 text-sm text-muted-foreground">{subtitle}</p>
     </div>
   )
 }
@@ -155,7 +156,7 @@ function ArithmeticChecks({ checks }: { checks: ArithmeticCheck[] }) {
   )
   const passed = checks.filter((c) => c.status === 'pass').length
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
+    <div className="rounded-lg border border-border bg-card">
       <div className="border-b border-border px-4 py-3">
         <h3 className="font-semibold">Arithmetic Checks</h3>
         <p className="text-xs text-muted-foreground">
@@ -229,7 +230,7 @@ function ExpirationsTab({ deal }: { deal: DealAnalysis }) {
         />
       </div>
       <ExpiryScheduleChart schedule={deal.expirySchedule} />
-      <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
+      <div className="rounded-lg border border-border bg-card">
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold">Expiration order</h3>
         </div>
@@ -303,9 +304,9 @@ function AbstractsTab({ deal }: { deal: DealAnalysis }) {
 
 function StatCard({ label, value, sub, highlight = false }: { label: string; value: string; sub?: string; highlight?: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
-      <div className="text-sm text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 text-2xl font-semibold tabular-nums', highlight && 'text-warning')}>{value}</div>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="eyebrow">{label}</div>
+      <div className={cn('mt-2 text-2xl font-semibold tabular-nums text-brand-navy', highlight && 'text-warning')}>{value}</div>
       {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
     </div>
   )

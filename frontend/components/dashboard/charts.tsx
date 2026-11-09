@@ -31,7 +31,7 @@ const SLICES = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--cha
 
 function Panel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-4">
         <h3 className="font-semibold">{title}</h3>
         <p className="text-xs text-muted-foreground">{subtitle}</p>

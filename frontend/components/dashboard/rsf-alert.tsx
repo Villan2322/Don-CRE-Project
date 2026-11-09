@@ -9,13 +9,13 @@ export function RSFAlert({ rsf }: { rsf: DealAnalysis['rsfReconciliation'] }) {
   const over = rsf.deltaSF > 0
 
   return (
-    <div className="rounded-lg border border-border border-l-4 border-l-gold bg-card p-6 shadow-sm">
+    <div className="rounded-lg border border-border border-l-4 border-l-gold bg-card p-6">
       <div className="flex items-start gap-4">
         <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft sm:flex">
           <AlertTriangle className="h-5 w-5 text-brand-navy" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-bold text-foreground">RSF Recovery Alert</h3>
+          <h3 className="text-lg font-semibold">RSF Recovery Alert</h3>
           <p className="mt-1 text-sm text-muted-foreground">
             BOMA total is {Math.abs(rsf.deltaPercent).toFixed(1)}% {over ? 'above' : 'below'} the area on the{' '}
             {rsf.occupiedSource ?? 'rent roll'}.

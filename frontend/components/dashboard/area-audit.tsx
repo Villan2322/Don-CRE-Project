@@ -34,8 +34,9 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
 
   const header = (
     <div className="mb-6">
-      <h2 className="text-xl font-semibold">Lease Audit</h2>
-      <p className="text-sm text-muted-foreground">
+      <h2 className="text-2xl md:text-[28px]">Lease Audit</h2>
+      <div className="mt-2 h-[3px] w-12 bg-gold" />
+      <p className="mt-3 text-sm text-muted-foreground">
         Is each tenant paying for the space it occupies? Billed area vs the BOMA measurement, in rent and CAM.
       </p>
     </div>
@@ -45,7 +46,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
     return (
       <div>
         {header}
-        <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-8 text-center">
+        <div className="rounded-lg border border-border bg-card p-8 text-center">
           <Ruler className="mx-auto h-8 w-8 text-muted-foreground" />
           <p className="mt-3 font-medium">This package can&apos;t be audited yet</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
@@ -115,7 +116,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
+      <div className="rounded-lg border border-border bg-card">
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold">By suite</h3>
           <p className="text-xs text-muted-foreground">
@@ -123,7 +124,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
           </p>
         </div>
         {/* Phones and iPads in portrait: one card per suite, dollars up front. */}
-        <ul className="divide-y divide-border lg:hidden">
+        <ul className="divide-y divide-border min-[1100px]:hidden">
           {rows.map((r) => {
             const isOpen = open === r.tenantId
             return (
@@ -161,7 +162,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
                     {r.leverage.call ? (
-                      <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', LEVERAGE[r.leverage.call].style)}>
+                      <span className={cn('inline-flex border px-2 py-0.5 text-xs font-medium', LEVERAGE[r.leverage.call].style)}>
                         {LEVERAGE[r.leverage.call].label}
                       </span>
                     ) : (
@@ -182,12 +183,12 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
             )
           })}
         </ul>
-        <div className="hidden overflow-x-auto lg:block">
-          <Table>
+        <div className="hidden overflow-x-auto min-[1100px]:block">
+          <Table className="text-[13px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-6" />
-                <TableHead className="min-w-[170px]">Tenant</TableHead>
+                <TableHead className="min-w-[150px]">Tenant</TableHead>
                 <TableHead className="text-right">Billed SF</TableHead>
                 <TableHead className="text-right">BOMA SF</TableHead>
                 <TableHead className="text-right">Gap</TableHead>
@@ -232,7 +233,7 @@ export function AreaAudit({ deal, onUpload }: { deal: DealAnalysis; onUpload: ()
                       <TableCell className="text-right font-medium tabular-nums">{gap(r.totalGap)}</TableCell>
                       <TableCell>
                         {r.leverage.call && (
-                          <span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', LEVERAGE[r.leverage.call].style)}>
+                          <span className={cn('inline-flex border px-2 py-0.5 text-xs font-medium', LEVERAGE[r.leverage.call].style)}>
                             {LEVERAGE[r.leverage.call].label}
                           </span>
                         )}
@@ -318,9 +319,9 @@ function Detail({ row }: { row: LeaseAuditRow }) {
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' }) {
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-4">
-      <div className="text-sm text-muted-foreground">{label}</div>
-      <div className={cn('mt-1 text-2xl font-semibold tabular-nums', tone === 'good' && 'text-success', tone === 'warn' && 'text-warning')}>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="eyebrow">{label}</div>
+      <div className={cn('mt-2 text-2xl font-semibold tabular-nums text-brand-navy', tone === 'good' && 'text-success', tone === 'warn' && 'text-warning')}>
         {value}
       </div>
       {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}

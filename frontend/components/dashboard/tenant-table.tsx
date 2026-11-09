@@ -15,14 +15,14 @@ const RISK = {
 export function TenantTable({ tenants }: { tenants: Tenant[] }) {
   if (tenants.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)] p-8 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
         No rent roll or leases in this package.
       </div>
     )
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-[0_1px_2px_rgba(11,26,58,0.04)]">
+    <div className="rounded-lg border border-border bg-card">
       <div className="border-b border-border px-4 py-3">
         <h3 className="font-semibold">Tenants</h3>
         <p className="text-xs text-muted-foreground">
@@ -36,10 +36,10 @@ export function TenantTable({ tenants }: { tenants: Tenant[] }) {
         ))}
       </ul>
       <div className="hidden overflow-x-auto min-[1100px]:block">
-        <Table>
+        <Table className="text-[13px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="min-w-[180px]">Tenant</TableHead>
+              <TableHead className="min-w-[150px]">Tenant</TableHead>
               <TableHead>Suite</TableHead>
               <TableHead className="text-right">RSF</TableHead>
               <TableHead className="text-right">BOMA RSF</TableHead>

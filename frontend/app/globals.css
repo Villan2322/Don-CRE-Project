@@ -3,26 +3,27 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Blue Commercial Properties brand (bluecpm.com): navy #00236E, gold #F9C22E, white,
-   Montserrat headings. Light theme; status colors are tuned for text on white. */
+/* White-labeled for Blue Commercial Properties, following bluecpm.com:
+   white pages, navy #00236E headings and bands, gold #F9C22E actions,
+   Montserrat throughout, gray body copy, square corners. */
 :root {
   --brand-navy: #00236e;
   --brand-navy-deep: #001a52;
   --brand-gold: #f9c22e;
 
-  --background: #f4f6fa;
-  --foreground: #0b1a3a;
+  --background: #f7f8fa;
+  --foreground: #1b2433;
   --card: #ffffff;
-  --card-foreground: #0b1a3a;
+  --card-foreground: #1b2433;
   --popover: #ffffff;
-  --popover-foreground: #0b1a3a;
+  --popover-foreground: #1b2433;
   --primary: #00236e;
   --primary-foreground: #ffffff;
-  --secondary: #eef1f7;
-  --secondary-foreground: #0b1a3a;
-  --muted: #eef1f7;
-  --muted-foreground: #5b6578;
-  --accent: #e8edf8;
+  --secondary: #f1f3f7;
+  --secondary-foreground: #1b2433;
+  --muted: #f1f3f7;
+  --muted-foreground: #6b7280;
+  --accent: #eef2fa;
   --accent-foreground: #00236e;
   --gold: #f9c22e;
   --gold-foreground: #00236e;
@@ -32,33 +33,32 @@
   --success-foreground: #ffffff;
   --warning: #b3600a;
   --warning-foreground: #ffffff;
-  --warning-soft: #fff5e3;
-  --success-soft: #e8f5ee;
+  --warning-soft: #fff6e2;
+  --success-soft: #e9f6ef;
   --destructive-soft: #fdeced;
-  --gold-soft: #fff8e0;
-  --border: #e1e6ef;
-  --input: #d3dae6;
+  --gold-soft: #fff8df;
+  --border: #e3e7ee;
+  --input: #d5dbe5;
   --ring: #00236e;
-  /* Charts: navy first, then a lighter blue, gold, slate */
   --chart-1: #00236e;
-  --chart-2: #3567c9;
+  --chart-2: #3e6fc4;
   --chart-3: #f9c22e;
-  --chart-4: #8aa6d6;
-  --chart-5: #a3acbd;
-  --radius: 0.375rem;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #0b1a3a;
-  --sidebar-primary: #00236e;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e8edf8;
-  --sidebar-accent-foreground: #00236e;
-  --sidebar-border: #e1e6ef;
-  --sidebar-ring: #00236e;
+  --chart-4: #9db5dd;
+  --chart-5: #b4bccb;
+  --radius: 0px;
+  --sidebar: #00236e;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #f9c22e;
+  --sidebar-primary-foreground: #00236e;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: #f9c22e;
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-heading: 'Montserrat Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Montserrat Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: 'Montserrat Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-gold: var(--gold);
   --color-gold-soft: var(--gold-soft);
@@ -96,10 +96,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -116,12 +116,23 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: 'cv11', 'ss01';
     -webkit-tap-highlight-color: transparent;
   }
   h1, h2, h3, h4 {
     font-family: var(--font-heading);
-    letter-spacing: -0.01em;
+    color: var(--brand-navy);
+  }
+  /* Section titles: light navy, as on bluecpm.com */
+  h2 {
+    font-weight: 300;
+  }
+  /* Small gray uppercase labels, like the site's section eyebrows */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-foreground);
   }
   /* Numbers line up in every table and stat. */
   .tabular-nums {

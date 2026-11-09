@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next'
-import '@fontsource-variable/inter'
 import '@fontsource-variable/montserrat'
 import './globals.css'
 
@@ -7,29 +6,17 @@ export const metadata: Metadata = {
   title: 'Deal Intelligence — Blue Commercial Properties',
   description: 'Automated deal analysis, lease abstraction, and RSF reconciliation for commercial real estate buyers',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
+    icon: [{ url: '/icon-32.png', sizes: '32x32', type: 'image/png' }, { url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
     apple: '/apple-icon.png',
   },
+  appleWebApp: { capable: true, title: 'Blue CPM Deals', statusBarStyle: 'default' },
 }
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#00236e',
+  themeColor: '#ffffff',
 }
 
 export default function RootLayout({

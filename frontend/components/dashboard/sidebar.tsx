@@ -43,11 +43,11 @@ export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
                 <button
                   onClick={() => onTabChange(item.id)}
                   className={cn(
-                    'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    'flex w-full items-center gap-3 border-l-[3px] px-3 py-2.5 text-sm font-medium transition-colors',
                     item.id === 'upload' && 'mt-4',
                     activeTab === item.id
-                      ? 'bg-sidebar-accent text-sidebar-foreground'
-                      : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                      ? 'border-gold bg-sidebar-accent text-white'
+                      : 'border-transparent text-white/70 hover:bg-sidebar-accent hover:text-white'
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -58,10 +58,10 @@ export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
           })}
         </ul>
       </nav>
-      <div className="border-t border-sidebar-border p-4 text-xs text-muted-foreground">
+      <div className="border-t border-sidebar-border p-4 text-xs text-white/60">
         {deal.isSample ? 'Sample analysis' : 'Analyzed'}
         <br />
-        <span className="text-sidebar-foreground">{timestamp(deal.submittedAt)}</span>
+        <span className="text-white">{timestamp(deal.submittedAt)}</span>
       </div>
     </aside>
   )
@@ -69,14 +69,14 @@ export function Sidebar({ activeTab, onTabChange, deal }: SidebarProps) {
 
 export function MobileTabs({ activeTab, onTabChange }: Omit<SidebarProps, 'deal'>) {
   return (
-    <div className="sticky -top-4 z-20 -mx-4 -mt-4 mb-4 flex gap-1 overflow-x-auto border-b border-border bg-background px-4 py-2 [scrollbar-width:none] md:-top-6 md:-mx-6 md:-mt-6 md:px-6 xl:hidden">
+    <div className="sticky -top-4 z-20 -mx-4 -mt-4 mb-4 flex overflow-x-auto border-b border-border bg-white px-4 [scrollbar-width:none] md:-top-6 md:-mx-6 md:-mt-6 md:px-6 xl:hidden">
       {navItems.map((item) => (
         <button
           key={item.id}
           onClick={() => onTabChange(item.id)}
           className={cn(
-            'shrink-0 rounded-md px-3 py-2.5 text-sm font-medium',
-            activeTab === item.id ? 'bg-secondary text-foreground' : 'text-muted-foreground'
+            'shrink-0 border-b-[3px] px-3 py-2.5 text-sm font-medium',
+            activeTab === item.id ? 'border-gold text-brand-navy' : 'border-transparent text-muted-foreground'
           )}
         >
           {item.label}
