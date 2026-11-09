@@ -23,3 +23,5 @@ services:
         value: "1"
       - key: MAX_UPLOAD_MB
         value: "50"
+      - key: KEEP_AWAKE_MINUTES
+        value: "10"

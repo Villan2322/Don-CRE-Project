@@ -18,7 +18,9 @@ import logging
 import secrets
 import os
 import time
+import urllib.request
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -53,10 +55,44 @@ NEXT_STAGE = {
     "build_report": "Finishing",
 }
 
+# Keep-awake. Render's free plan stops a service after 15 idle minutes and takes about a
+# minute to wake it. Render sets RENDER_EXTERNAL_URL; visiting our own public /health on a
+# timer goes through Render's front door, which counts as traffic. KEEP_AWAKE_MINUTES=0 turns it off.
+KEEP_AWAKE_URL = os.environ.get("KEEP_AWAKE_URL") or os.environ.get("RENDER_EXTERNAL_URL", "")
+KEEP_AWAKE_MINUTES = float(os.environ.get("KEEP_AWAKE_MINUTES", 10))
+
+
+def _ping(url: str) -> int:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "keep-awake"}), timeout=30) as r:
+        return r.status
+
+
+async def keep_awake(url: str, every_seconds: float) -> None:
+    target = url.rstrip("/") + "/health"
+    log.info("keep-awake: pinging %s every %.0f min", target, every_seconds / 60)
+    while True:
+        await asyncio.sleep(every_seconds)
+        try:
+            await asyncio.to_thread(_ping, target)
+        except Exception as e:  # a missed ping just means one chance to sleep; try again next time
+            log.warning("keep-awake ping failed: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = None
+    if KEEP_AWAKE_URL and KEEP_AWAKE_MINUTES > 0:
+        task = asyncio.create_task(keep_awake(KEEP_AWAKE_URL, KEEP_AWAKE_MINUTES * 60))
+    yield
+    if task:
+        task.cancel()
+
+
 app = FastAPI(
     title="CRE Document Intelligence",
     description="AI-assisted document analysis for commercial real estate due diligence",
     version="3.0.0",
+    lifespan=lifespan,
 )
 # Login. When APP_PASSWORD is set, every page and API call needs it (HTTP basic auth,
 # which the browser prompts for). Only /health stays open for the platform's checks.

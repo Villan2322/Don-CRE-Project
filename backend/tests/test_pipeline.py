@@ -341,3 +341,42 @@ def test_bad_prior_is_rejected(client):
 def test_nothing_new_and_nothing_carried_is_rejected(client):
     resp = client.post("/api/analyze", data={"deal_name": "x"})
     assert resp.status_code in (400, 422)
+
+
+# ── keep-awake ───────────────────────────────────────────────────────────────
+
+async def test_keep_awake_pings_health_on_a_timer(monkeypatch):
+    import asyncio
+    import main
+    hits = []
+    monkeypatch.setattr(main, "_ping", lambda url: hits.append(url) or 200)
+    task = asyncio.create_task(main.keep_awake("https://example.onrender.com/", 0.01))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    assert hits and set(hits) == {"https://example.onrender.com/health"}
+
+
+async def test_keep_awake_survives_a_failed_ping(monkeypatch):
+    import asyncio
+    import main
+    calls = []
+
+    def flaky(url):
+        calls.append(url)
+        raise OSError("network down")
+
+    monkeypatch.setattr(main, "_ping", flaky)
+    task = asyncio.create_task(main.keep_awake("https://x.onrender.com", 0.01))
+    await asyncio.sleep(0.05)
+    assert not task.done() and len(calls) >= 2  # keeps going after failures
+    task.cancel()
+
+
+def test_keep_awake_is_off_without_a_render_url(monkeypatch):
+    import main
+    monkeypatch.setattr(main, "KEEP_AWAKE_URL", "")
+    started = []
+    monkeypatch.setattr(main, "keep_awake", lambda *a: started.append(a))
+    with TestClient(main.app) as c:
+        assert c.get("/health").status_code == 200
+    assert started == []

@@ -59,7 +59,7 @@ Without Compose (e.g. a container platform that handles HTTPS itself): build the
 
 `render.yaml` defines one free web service built from the `Dockerfile`. In Render: **New → Blueprint**, pick this repo, enter `ANTHROPIC_API_KEY` when asked. Render generates `APP_PASSWORD`; find it under the service's **Environment** tab and log in as `don`.
 
-The free plan sleeps after 15 idle minutes (the first visit after that takes about a minute) and has 512 MB of memory, so it runs one analysis at a time with uploads up to 50 MB.
+The free plan normally sleeps after 15 idle minutes. The app keeps itself awake by visiting its own public `/health` every 10 minutes (it reads `RENDER_EXTERNAL_URL`, which Render sets; `KEEP_AWAKE_MINUTES=0` turns this off). Running 24/7 uses about 744 of the 750 free instance hours Render gives a workspace each month, so any other free service in the same workspace will run out of hours. The free plan has 512 MB of memory, so it runs one analysis at a time with uploads up to 50 MB.
 
 ## Environment
 
@@ -71,6 +71,7 @@ The free plan sleeps after 15 idle minutes (the first visit after that takes abo
 | `CLAUDE_MODEL` | no | defaults to `claude-sonnet-5-5` |
 | `MAX_UPLOAD_MB` | no | defaults to 100 |
 | `MAX_CONCURRENT_ANALYSES` | no | defaults to 3; extra jobs wait their turn |
+| `KEEP_AWAKE_MINUTES` | no | how often the app pings its own `/health` to stay awake on Render's free plan (default 10; 0 = off). Uses `RENDER_EXTERNAL_URL`, or `KEEP_AWAKE_URL` elsewhere |
 | `LANGSMITH_API_KEY` | no | turns on LangSmith tracing |
 
 ## Run locally
