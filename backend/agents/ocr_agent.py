@@ -9,7 +9,7 @@ so it runs the same in a slim container as it does locally.
 import base64
 from typing import Optional
 
-from .base import BaseAgent
+from .base import BaseAgent, fatal_api_message
 
 TRANSCRIBE_PROMPT = """Transcribe every piece of text in this document exactly as written.
 Keep tables as tab-separated rows, one row per line, with the header row first.
@@ -42,10 +42,11 @@ class OCRAgent(BaseAgent):
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=TRANSCRIBE_MAX_TOKENS,
-                temperature=0,
                 messages=[{"role": "user", "content": [block, {"type": "text", "text": TRANSCRIBE_PROMPT}]}],
             )
         except Exception as e:
+            if fatal_api_message(e):
+                raise
             return self._fail(f"OCR request failed: {e}")
 
         text = "".join(b.text for b in response.content if b.type == "text").strip()

@@ -25,7 +25,7 @@ class FakeClaude:
         self.fail_synthesis = fail_synthesis
         self.calls = []
 
-    async def __call__(self, agent, system_prompt, user_message, max_tokens=4000, temperature=0.0):
+    async def __call__(self, agent, system_prompt, user_message, max_tokens=4000):
         self.calls.append(agent.name)
         if user_message.rstrip().endswith("Classify this document."):
             name = re.search(r"Filename: (.+)", user_message).group(1).strip()
@@ -242,3 +242,29 @@ def test_password_protects_everything_but_health(monkeypatch):
     assert c.get("/api/health", headers={"Authorization": bad}).status_code == 401
     good = "Basic " + b64.b64encode(b"don:s3cret").decode()
     assert c.get("/api/health", headers={"Authorization": good}).status_code == 200
+
+
+def test_a_rejected_api_key_fails_the_job_with_a_clear_message(client, monkeypatch):
+    async def rejected(self, *args, **kwargs):
+        raise RuntimeError("Error code: 400 - This API key is not scoped to a workspace")
+
+    monkeypatch.setattr(base.BaseAgent, "call_llm", rejected)
+    files = [("files", (name, text.encode(), "text/plain")) for name, text in FILE_TEXT.items()]
+    resp = client.post("/api/analyze", data={"deal_name": "x"}, files=files)
+    job, _ = wait_for(client, resp.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "check ANTHROPIC_API_KEY" in job["error"] and "workspace" in job["error"]
+
+
+def test_health_verify_reports_a_bad_key(client, monkeypatch):
+    import main
+
+    class Boom:
+        class messages:
+            @staticmethod
+            async def create(**kwargs):
+                raise RuntimeError("invalid x-api-key")
+
+    monkeypatch.setattr(main, "make_client", lambda: Boom)
+    body = client.get("/api/health?verify=true").json()
+    assert body["anthropic_key_works"] is False and "x-api-key" in body["anthropic_error"]

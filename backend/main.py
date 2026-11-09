@@ -27,6 +27,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from agents.base import DEFAULT_MODEL, fatal_api_message, make_client
 from graph import graph
 from state import initial_state
 
@@ -120,19 +121,33 @@ async def _run(job_id: str, state: dict) -> None:
             "errors": final.get("ingest_errors", []) + final.get("pipeline_errors", []),
             "analysis": final.get("report"),
         })
-        log.info("job %s done: %s", job_id, final.get("pipeline_stage"))
+        for err in job["result"]["errors"]:
+            log.warning("job %s: %s", job_id, err)
+        log.info("job %s done: %s (%d problem(s))", job_id, final.get("pipeline_stage"), len(job["result"]["errors"]))
     except Exception as e:  # never leave a job stuck in "running"
         log.exception("job %s failed", job_id)
-        job.update(status="failed", error=f"The analysis failed: {e}")
+        job.update(status="failed", error=fatal_api_message(e) or f"The analysis failed: {e}")
 
 
 @api.get("/health")
-async def health() -> dict:
-    return {
+async def health(verify: bool = False) -> dict:
+    """Add ?verify=true to make one tiny Claude call and confirm the key actually works."""
+    out = {
         "status": "ok",
         "anthropic_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "workspace_header": bool(os.environ.get("ANTHROPIC_WORKSPACE_ID")),
         "jobs_in_memory": len(_jobs),
     }
+    if verify:
+        try:
+            await make_client().messages.create(
+                model=os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL), max_tokens=1,
+                messages=[{"role": "user", "content": "ok"}])
+            out["anthropic_key_works"] = True
+        except Exception as e:
+            out["anthropic_key_works"] = False
+            out["anthropic_error"] = str(e)[:400]
+    return out
 
 
 @api.post("/analyze", status_code=202)

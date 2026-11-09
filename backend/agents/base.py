@@ -5,7 +5,36 @@ from typing import Optional
 
 import anthropic
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
+
+
+def make_client() -> anthropic.AsyncAnthropic:
+    """Claude client. ANTHROPIC_WORKSPACE_ID is only needed for keys not scoped to a workspace."""
+    headers = {}
+    if os.environ.get("ANTHROPIC_WORKSPACE_ID"):
+        headers["anthropic-workspace-id"] = os.environ["ANTHROPIC_WORKSPACE_ID"]
+    return anthropic.AsyncAnthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        max_retries=3,
+        default_headers=headers or None,
+    )
+
+
+# Errors that mean no call will ever succeed until someone fixes the account or key.
+FATAL_API_ERRORS = (
+    anthropic.AuthenticationError,
+    anthropic.PermissionDeniedError,
+)
+
+
+def fatal_api_message(error: BaseException) -> str | None:
+    """A plain explanation if this error means the API key or account is unusable, else None."""
+    text = str(error)
+    low = text.lower()
+    if isinstance(error, FATAL_API_ERRORS) or "x-api-key" in low or "api key" in low \
+            or "workspace" in low or "credit balance" in low:
+        return f"Anthropic rejected the request — check ANTHROPIC_API_KEY on the server. Details: {text[:300]}"
+    return None
 
 
 class BaseAgent:
@@ -20,18 +49,14 @@ class BaseAgent:
     @property
     def client(self) -> anthropic.AsyncAnthropic:
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(
-                api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-                max_retries=3,
-            )
+            self._client = make_client()
         return self._client
 
     async def call_llm(self, system_prompt: str, user_message: str,
-                       max_tokens: int = 4000, temperature: float = 0.0) -> str:
+                       max_tokens: int = 4000) -> str:
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
-            temperature=temperature,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )

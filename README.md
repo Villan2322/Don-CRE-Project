@@ -60,7 +60,7 @@ The free plan sleeps after 15 idle minutes (the first visit after that takes abo
 | `ANTHROPIC_API_KEY` | yes | `/api/analyze` returns 503 without it |
 | `APP_PASSWORD` | yes, unless Caddy handles login | the app's own login (user `APP_USER`, default `don`); `/health` stays open |
 | `DOMAIN`, `APP_USER`, `APP_PASSWORD_HASH` | with Compose | Caddy's HTTPS domain and login |
-| `CLAUDE_MODEL` | no | defaults to `claude-sonnet-4-5` |
+| `CLAUDE_MODEL` | no | defaults to `claude-sonnet-5-5` |
 | `MAX_UPLOAD_MB` | no | defaults to 100 |
 | `MAX_CONCURRENT_ANALYSES` | no | defaults to 3; extra jobs wait their turn |
 | `LANGSMITH_API_KEY` | no | turns on LangSmith tracing |

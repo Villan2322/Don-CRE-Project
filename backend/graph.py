@@ -24,6 +24,7 @@ from agents.document_parsing import DocumentParsingAgent
 from agents.ocr_agent import OCRAgent
 from agents.universal_extractor import UniversalExtractor
 from agents.synthesis import SynthesisAgent
+from agents.base import fatal_api_message
 from services.deal_metrics import compute_metrics as _compute_metrics, build_report as _build_report, public_metrics
 
 log = logging.getLogger("cre.pipeline")
@@ -69,6 +70,8 @@ async def ingest_documents(state: CREPipelineState) -> dict:
     )
     docs, errors = [], []
     for (name, _), result in zip(state["raw_files"].items(), results):
+        if isinstance(result, Exception) and fatal_api_message(result):
+            raise result
         if isinstance(result, Exception):
             errors.append(f"{name}: {result}")
             continue
@@ -89,6 +92,8 @@ async def classify_documents(state: CREPipelineState) -> dict:
                     "classification_confidence": result["confidence"],
                     "classification_reasoning": result["reasoning"]}, None
         except Exception as e:
+            if fatal_api_message(e):
+                raise
             return ({**doc, "doc_type": "OTHER", "classification_confidence": 0.0,
                      "classification_reasoning": str(e)}, f"{doc['filename']}: classification failed — {e}")
 
@@ -114,6 +119,8 @@ async def extract_document(state: SingleDocumentState) -> dict:
             text=state["extracted_text"], doc_type=state["doc_type"], doc_id=state["doc_id"],
             deal_name=state["deal_name"], filename=state["filename"])
     except Exception as e:
+        if fatal_api_message(e):
+            raise
         result = {"doc_id": state["doc_id"], "doc_type": state["doc_type"], "filename": state["filename"],
                   "deal_name": state["deal_name"], "extraction": {}, "parse_error": str(e),
                   "pipeline_stage": "extraction_failed"}
@@ -135,6 +142,8 @@ async def synthesize(state: CREPipelineState) -> dict:
             deal_name=state["deal_name"])
         return {"synthesis": result, "pipeline_stage": "synthesized"}
     except Exception as e:
+        if fatal_api_message(e):
+            raise
         log.exception("synthesis failed")
         # The computed report still stands without the qualitative review.
         return {"synthesis": {}, "pipeline_stage": "synthesis_failed",
