@@ -18,3 +18,7 @@ node_modules
 __pycache__/
 .pytest_cache/
 .venv/
+
+# Local secrets and builds
+.env
+frontend/out/

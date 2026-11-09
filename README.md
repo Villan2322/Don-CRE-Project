@@ -24,20 +24,39 @@ The RSF Recovery Alert fires when BOMA and the billed area differ by more than 5
 
 ## Layout
 
-- `backend/` — FastAPI + LangGraph. Entry point `main.py`, pipeline `graph.py`.
-- `frontend/` — Next.js dashboard. Calls `POST /backend/analyze` directly from the browser.
-- `app/`, `components/`, `lib/` at the root mirror `frontend/` for the v0 dev server. Keep both in sync.
-- Analyses are saved in the browser (localStorage). The backend stores nothing.
+- `backend/` — FastAPI + LangGraph. `main.py` serves the API under `/api` and the built dashboard at `/`.
+- `frontend/` — Next.js dashboard, built to static files (`npm run build` → `frontend/out`).
+- An analysis runs as a background job: `POST /api/analyze` returns a job id, the browser polls `GET /api/jobs/{id}` and shows progress. Every request stays short, so no proxy timeout can cut off a long run.
+- Finished analyses are saved in the browser (localStorage). The server keeps jobs in memory for 6 hours, so run **one** instance.
+
+## Deploy (any server with Docker)
+
+One image holds everything. `docker-compose.yml` runs it behind Caddy, which gets an HTTPS certificate automatically and puts a username and password in front of the app.
+
+1. Get a small Linux server (2 vCPU / 4 GB is plenty) and point a domain's A record at its IP.
+2. Install Docker, clone this repo, then:
+   ```bash
+   cp .env.example .env
+   docker run --rm caddy:2.8 caddy hash-password --plaintext 'choose-a-password'
+   # put the hash in .env (inside single quotes), plus ANTHROPIC_API_KEY and DOMAIN
+   docker compose up -d --build
+   ```
+3. Open `https://your-domain`, log in, and check `https://your-domain/api/health` shows `"anthropic_key_configured": true`.
+
+To update: `git pull && docker compose up -d --build`.
+
+Without Compose (e.g. a container platform that handles HTTPS itself): build the `Dockerfile`, set `ANTHROPIC_API_KEY`, expose port 8000, and use `/health` as the health check. Put your own login in front of it — the app has none.
 
 ## Environment
 
-| Variable | Where | Required | Notes |
-|---|---|---|---|
-| `ANTHROPIC_API_KEY` | backend | yes | `/analyze` returns 503 without it |
-| `CLAUDE_MODEL` | backend | no | defaults to `claude-sonnet-4-5` |
-| `LANGSMITH_API_KEY` | backend | no | turns on LangSmith tracing |
-| `NEXT_PUBLIC_BACKEND_URL` | frontend | no | defaults to `/backend` |
-| `NEXT_PUBLIC_MAX_UPLOAD_MB` | frontend | no | defaults to 4.4 (Vercel's request limit is 4.5 MB) |
+| Variable | Required | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | `/api/analyze` returns 503 without it |
+| `DOMAIN`, `APP_USER`, `APP_PASSWORD_HASH` | with Compose | Caddy's HTTPS domain and login |
+| `CLAUDE_MODEL` | no | defaults to `claude-sonnet-4-5` |
+| `MAX_UPLOAD_MB` | no | defaults to 100 |
+| `MAX_CONCURRENT_ANALYSES` | no | defaults to 3; extra jobs wait their turn |
+| `LANGSMITH_API_KEY` | no | turns on LangSmith tracing |
 
 ## Run locally
 
@@ -48,11 +67,13 @@ pip install -r requirements.txt
 export ANTHROPIC_API_KEY=...
 uvicorn main:app --port 8000
 
-# frontend (proxies /backend to localhost:8000)
+# frontend with hot reload (proxies /api to :8000)
 cd frontend
 npm install
 npm run dev
 ```
+
+Or build the dashboard once (`cd frontend && npm run build`) and open http://localhost:8000 — the backend serves it.
 
 ## Tests
 
@@ -62,10 +83,10 @@ pip install pytest pytest-asyncio httpx reportlab
 python -m pytest
 ```
 
-The suite runs the 5041 Bayou Blvd test package (`tests/fixtures.py`) through the metrics, scoring, the full graph with Claude stubbed, and the API.
+The suite runs the 5041 Bayou Blvd test package (`tests/fixtures.py`) through the metrics, scoring, the full graph with Claude stubbed, and the job API.
 
 ## Known limits
 
-- **Upload size.** Vercel caps a request at 4.5 MB. Large scanned packages need to be split, or the backend moved to a host without that cap (or files uploaded to blob storage first).
-- **Run time.** A full package takes 1–3 minutes. The backend function's timeout must allow that.
-- **Very long scans.** OCR transcribes up to about 20,000 tokens per file; the document is flagged if it was cut off.
+- **One instance.** Jobs are held in memory. Scaling out needs a shared job store (Redis or a database).
+- **Run time.** A full package takes 1–3 minutes; three run at once by default.
+- **Very long scans.** OCR transcribes up to about 20,000 tokens per file, and a single scanned file must be under 30 MB. The document is flagged if it was cut off.

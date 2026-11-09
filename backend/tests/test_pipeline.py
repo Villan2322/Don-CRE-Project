@@ -3,6 +3,7 @@
 import io
 import json
 import re
+import time
 
 import openpyxl
 import pytest
@@ -161,27 +162,69 @@ def test_parser_reads_xlsx():
 def client(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     from main import app
-    return TestClient(app)
+    with TestClient(app) as c:  # keeps the event loop alive for background jobs
+        yield c
 
 
-def test_analyze_endpoint_returns_dashboard_payload(fake_claude, client):
+def wait_for(client, job_id, timeout=30):
+    deadline = time.time() + timeout
+    seen = []
+    while time.time() < deadline:
+        job = client.get(f"/api/jobs/{job_id}").json()
+        seen.append(job["stage"])
+        if job["status"] in ("done", "failed"):
+            return job, seen
+        time.sleep(0.05)
+    raise AssertionError(f"job did not finish; stages seen: {seen}")
+
+
+def test_analyze_runs_as_a_job_and_returns_the_dashboard_payload(fake_claude, client):
     files = [("files", (name, text.encode(), "text/plain")) for name, text in FILE_TEXT.items()]
-    resp = client.post("/analyze", data={"deal_name": "Sterling Test", "as_of": AS_OF}, files=files)
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    resp = client.post("/api/analyze", data={"deal_name": "Sterling Test", "as_of": AS_OF}, files=files)
+    assert resp.status_code == 202, resp.text
+    job, stages = wait_for(client, resp.json()["job_id"])
+    assert job["status"] == "done", job
+    body = job["result"]
     assert body["pipeline_stage"] == "completed"
     assert body["analysis"]["tier"] in ("GREEN", "YELLOW", "ORANGE", "RED")
     assert len(body["analysis"]["tenants"]) == 6
+    assert job["stage"] == "Done"
+
+
+def test_a_crashing_pipeline_marks_the_job_failed(client, monkeypatch):
+    import main
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("disk on fire")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(main.graph, "astream", boom)
+    resp = client.post("/api/analyze", data={"deal_name": "x"}, files=[("files", ("a.txt", b"hello", "text/plain"))])
+    job, _ = wait_for(client, resp.json()["job_id"])
+    assert job["status"] == "failed" and "disk on fire" in job["error"]
+
+
+def test_unknown_job_is_404(client):
+    assert client.get("/api/jobs/nope").status_code == 404
+
+
+def test_upload_size_limit(client, monkeypatch):
+    import main
+    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 0.001)
+    resp = client.post("/api/analyze", data={"deal_name": "x"},
+                       files=[("files", ("big.txt", b"x" * 5000, "text/plain"))])
+    assert resp.status_code == 413
 
 
 def test_analyze_requires_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     from main import app
-    resp = TestClient(app).post("/analyze", data={"deal_name": "x"},
+    resp = TestClient(app).post("/api/analyze", data={"deal_name": "x"},
                                 files=[("files", ("a.txt", b"hello", "text/plain"))])
     assert resp.status_code == 503
     assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
 
 
 def test_health(client):
-    assert client.get("/health").json()["anthropic_key_configured"] is True
+    assert client.get("/api/health").json()["anthropic_key_configured"] is True
+    assert client.get("/health").json() == {"status": "ok"}

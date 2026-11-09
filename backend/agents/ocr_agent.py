@@ -3,7 +3,7 @@ OCR Agent
 
 Reads scanned PDFs and images by sending the file straight to Claude,
 which handles image-only pages natively. No Tesseract or poppler binaries,
-so it runs the same on Vercel as it does locally.
+so it runs the same in a slim container as it does locally.
 """
 
 import base64

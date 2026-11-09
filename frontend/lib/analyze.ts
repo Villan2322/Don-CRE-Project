@@ -1,13 +1,9 @@
 import { DealAnalysis } from './types'
 
-// On Vercel the Python service is mounted at /backend (see vercel.json).
-// For local dev, next.config.mjs rewrites /backend to BACKEND_URL (default http://localhost:8000).
-const BACKEND = (process.env.NEXT_PUBLIC_BACKEND_URL || '/backend').replace(/\/$/, '')
+// The Python server serves this app and the API from the same origin.
+const API = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/$/, '')
 
-// Vercel functions reject request bodies over 4.5 MB. Raise this only when the
-// backend runs somewhere without that limit.
-export const MAX_UPLOAD_BYTES =
-  Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB || 4.4) * 1024 * 1024
+export const MAX_UPLOAD_BYTES = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB || 100) * 1024 * 1024
 
 export const ACCEPTED_FILES: Record<string, string[]> = {
   'application/pdf': ['.pdf'],
@@ -19,40 +15,59 @@ export const ACCEPTED_FILES: Record<string, string[]> = {
   'image/jpeg': ['.jpg', '.jpeg'],
 }
 
+const POLL_MS = 2000
+const GIVE_UP_MS = 20 * 60 * 1000
+
 export interface AnalyzeResult {
   analysis: DealAnalysis
   errors: string[]
 }
 
-export async function analyzeDeal(dealName: string, files: File[]): Promise<AnalyzeResult> {
+// Starts an analysis job, then polls until it finishes. Polling keeps every
+// request short, so no proxy or load balancer timeout can cut off a long run.
+export async function analyzeDeal(
+  dealName: string,
+  files: File[],
+  onStage?: (stage: string) => void
+): Promise<AnalyzeResult> {
   const form = new FormData()
   form.append('deal_name', dealName)
   for (const file of files) form.append('files', file, file.name)
 
+  const started = await request(`${API}/analyze`, { method: 'POST', body: form })
+  const jobId: string = started.job_id
+  const deadline = Date.now() + GIVE_UP_MS
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_MS))
+    const job = await request(`${API}/jobs/${jobId}`)
+    if (job.stage) onStage?.(job.stage)
+    if (job.status === 'done') {
+      if (!job.result?.analysis) throw new Error('The analysis finished but returned no results.')
+      return { analysis: job.result.analysis as DealAnalysis, errors: job.result.errors ?? [] }
+    }
+    if (job.status === 'failed') throw new Error(job.error || 'The analysis failed.')
+  }
+  throw new Error('The analysis is taking unusually long. Check back in a few minutes or try fewer documents.')
+}
+
+async function request(url: string, init?: RequestInit) {
   let response: Response
   try {
-    response = await fetch(`${BACKEND}/analyze`, { method: 'POST', body: form })
+    response = await fetch(url, init)
   } catch {
     throw new Error('Could not reach the analysis service. Check your connection and try again.')
   }
-
-  if (!response.ok) {
-    throw new Error(await describeError(response))
-  }
-
-  const body = await response.json()
-  if (!body?.analysis) {
-    throw new Error('The analysis finished but returned no results.')
-  }
-  return { analysis: body.analysis as DealAnalysis, errors: body.errors ?? [] }
+  if (!response.ok) throw new Error(await describeError(response))
+  return response.json()
 }
 
 async function describeError(response: Response): Promise<string> {
   if (response.status === 413) {
-    return 'The upload is too large for one request. Remove the largest files or split the package and try again.'
+    return 'The upload is too large. Remove the largest files or split the package and try again.'
   }
-  if (response.status === 504) {
-    return 'The analysis took longer than the server allows. Try fewer documents at once.'
+  if (response.status === 404) {
+    return 'The analysis job was not found. The server may have restarted — please run it again.'
   }
   const raw = await response.text()
   try {
@@ -61,5 +76,5 @@ async function describeError(response: Response): Promise<string> {
   } catch {
     // not JSON
   }
-  return `Analysis failed (${response.status}). ${raw.slice(0, 200)}`.trim()
+  return `Request failed (${response.status}). ${raw.slice(0, 200)}`.trim()
 }

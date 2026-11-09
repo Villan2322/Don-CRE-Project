@@ -51,6 +51,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const [running, setRunning] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [stage, setStage] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => () => {
@@ -83,11 +84,12 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
   const run = async () => {
     setError(null)
     setRunning(true)
+    setStage(null)
     setElapsed(0)
     const started = Date.now()
     timer.current = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
     try {
-      const { analysis } = await analyzeDeal(dealName.trim() || dealNameFrom(files), files)
+      const { analysis } = await analyzeDeal(dealName.trim() || dealNameFrom(files), files, setStage)
       setFiles([])
       setDealName('')
       setNameTouched(false)
@@ -217,7 +219,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="text-sm text-muted-foreground">
                 {running
-                  ? `Working… ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} elapsed. Most packages take 1–3 minutes.`
+                  ? `${stage ?? 'Uploading'}… ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} elapsed. Most packages take 1–3 minutes.`
                   : 'Analysis usually takes 1–3 minutes.'}
               </div>
               <Button size="lg" onClick={run} disabled={running || overLimit} className="min-w-[160px]">
