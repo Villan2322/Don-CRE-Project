@@ -1,0 +1,27 @@
+# Render Blueprint — one free web service built from the Dockerfile.
+# Render prompts for ANTHROPIC_API_KEY on first deploy and generates APP_PASSWORD
+# (read it under the service's Environment tab). Log in as "don".
+services:
+  - type: web
+    name: cre-intelligence
+    runtime: docker
+    plan: free
+    region: ohio
+    branch: finish-pipeline-and-dashboard
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APP_USER
+        value: don
+      - key: APP_PASSWORD
+        generateValue: true
+      # The free plan has 512 MB of memory: one analysis at a time, smaller uploads.
+      - key: MAX_CONCURRENT_ANALYSES
+        value: "1"
+      - key: MAX_UPLOAD_MB
+        value: "50"
+      - key: KEEP_AWAKE_MINUTES
+        value: "10"

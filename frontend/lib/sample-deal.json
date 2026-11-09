@@ -1,0 +1,1098 @@
+{
+  "id": "sample",
+  "dealName": "Sample \u2014 5041 Bayou Blvd",
+  "propertyAddress": "5041 Bayou Blvd, Pensacola, FL 32503",
+  "submittedAt": "2026-11-05T15:00:00Z",
+  "asOf": "2026-11-05",
+  "dataAsOf": "2025-08-20",
+  "dataAgeMonths": 14,
+  "landlordUseSpaces": [],
+  "score": 63,
+  "tier": "YELLOW",
+  "dealReadiness": "Proceed with conditions",
+  "subScores": {
+    "dataCompleteness": 20,
+    "rsfAlignment": 0.0,
+    "financialIntegrity": 15,
+    "leaseLeverage": 4.1,
+    "riskProfile": 9,
+    "documentCoverage": 15.0
+  },
+  "scoreBreakdown": {
+    "dataCompleteness": {
+      "points": 20,
+      "max": 20,
+      "reasons": [
+        {
+          "text": "Rent roll",
+          "earned": true,
+          "points": 4
+        },
+        {
+          "text": "Executed leases",
+          "earned": true,
+          "points": 4
+        },
+        {
+          "text": "BOMA measurement",
+          "earned": true,
+          "points": 4
+        },
+        {
+          "text": "Operating financials",
+          "earned": true,
+          "points": 4
+        },
+        {
+          "text": "County property appraiser record",
+          "earned": true,
+          "points": 4
+        }
+      ]
+    },
+    "rsfAlignment": {
+      "points": 0.0,
+      "max": 20,
+      "reasons": [
+        {
+          "text": "BOMA and rent roll differ by 18.5%",
+          "earned": false,
+          "points": 2
+        },
+        {
+          "text": "5 suite(s) off BOMA by more than 5%",
+          "earned": false,
+          "points": -4
+        }
+      ]
+    },
+    "financialIntegrity": {
+      "points": 15,
+      "max": 20,
+      "reasons": [
+        {
+          "text": "Annualized from year-to-date NOI (Jan-Aug 2025, management report)",
+          "earned": true,
+          "points": 6
+        },
+        {
+          "text": "20 of 21 arithmetic checks verified",
+          "earned": false,
+          "points": 5
+        },
+        {
+          "text": "$18,360 past due 60+ days (6.2% of annual rent)",
+          "earned": false,
+          "points": 4
+        }
+      ]
+    },
+    "leaseLeverage": {
+      "points": 4.1,
+      "max": 20,
+      "reasons": [
+        {
+          "text": "WALT 12 months (55% of rent has a known expiry)",
+          "earned": false,
+          "points": 2
+        },
+        {
+          "text": "35% of rent backed by a lease on file",
+          "earned": false,
+          "points": 2.1
+        },
+        {
+          "text": "5 tenant(s) expired, expiring within 12 months, month-to-month, or undated",
+          "earned": false,
+          "points": 0
+        }
+      ]
+    },
+    "riskProfile": {
+      "points": 9,
+      "max": 15,
+      "reasons": [
+        {
+          "text": "Vacancy 0.0%",
+          "earned": true,
+          "points": 8
+        },
+        {
+          "text": "Largest tenant Retrev Legal is 45% of rent",
+          "earned": false,
+          "points": 1
+        }
+      ]
+    },
+    "documentCoverage": {
+      "points": 15.0,
+      "max": 15,
+      "reasons": [
+        {
+          "text": "4 of 4 documents read and extracted",
+          "earned": true,
+          "points": 10.0
+        },
+        {
+          "text": "RSF recovery opportunity identified (BOMA vs rent roll over 5%)",
+          "earned": true,
+          "points": 5
+        }
+      ]
+    }
+  },
+  "executiveSummary": "Two-story office building at 5041 Bayou Blvd with six tenants.",
+  "rsfReconciliation": {
+    "bomaTotalSF": 29451.52,
+    "rentRollOccupiedSF": 24847.0,
+    "occupiedSource": "rent roll",
+    "deltaSF": 4604.52,
+    "deltaPercent": 18.53,
+    "estimatedAnnualRecovery": 95930.95,
+    "alertTriggered": true,
+    "comparable": true,
+    "countyTotalSF": 35857.0,
+    "countyNote": "County total includes 3,389 SF of canopy/porch, which is not rentable area.",
+    "baseRentRecovery": 54858.63,
+    "camRecovery": 41072.32,
+    "camRatePSF": 8.92,
+    "averageRentPSF": 11.91
+  },
+  "leaseAudit": {
+    "available": true,
+    "tenants": [
+      {
+        "tenantId": "t-1",
+        "name": "Doreen McClung",
+        "suite": "Suite 100",
+        "billedRsf": 560.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 881.56,
+        "bomaUsf": 676.0,
+        "deltaSF": 321.56,
+        "deltaPct": 57.42,
+        "billedLoadFactor": 0.828,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 2.993,
+        "rentPSF": 15.0,
+        "baseRentGap": 4823.4,
+        "billedCam": 4992.7,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 7859.59,
+        "camGap": 2866.88,
+        "totalGap": 7690.28,
+        "correctedAnnualRent": 13223.4,
+        "recoversExpenses": null,
+        "expenseNote": "Expense terms unknown \u2014 assumed the tenant pays its share",
+        "leverage": {
+          "call": "NO_LEASE",
+          "reason": "No lease in the package \u2014 get it to see if the area can be corrected",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": null,
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": null
+      },
+      {
+        "tenantId": "t-2",
+        "name": "Feldmann Agency",
+        "suite": "Suite 120",
+        "billedRsf": 780.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 1096.74,
+        "bomaUsf": 841.0,
+        "deltaSF": 316.74,
+        "deltaPct": 40.61,
+        "billedLoadFactor": 0.927,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 3.724,
+        "rentPSF": 14.62,
+        "baseRentGap": 4629.28,
+        "billedCam": 6954.12,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 9778.03,
+        "camGap": 2823.91,
+        "totalGap": 7453.19,
+        "correctedAnnualRent": 16029.28,
+        "recoversExpenses": null,
+        "expenseNote": "Expense terms unknown \u2014 assumed the tenant pays its share",
+        "leverage": {
+          "call": "NO_LEASE",
+          "reason": "No lease in the package \u2014 get it to see if the area can be corrected",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": null,
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": null
+      },
+      {
+        "tenantId": "t-3",
+        "name": "Complete Apartment Care",
+        "suite": "Suite 130",
+        "billedRsf": 1700.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 2076.11,
+        "bomaUsf": 1592.0,
+        "deltaSF": 376.11,
+        "deltaPct": 22.12,
+        "billedLoadFactor": 1.068,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 7.049,
+        "rentPSF": 13.06,
+        "baseRentGap": 4911.55,
+        "billedCam": 15156.42,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 18509.65,
+        "camGap": 3353.23,
+        "totalGap": 8264.78,
+        "correctedAnnualRent": 27111.55,
+        "recoversExpenses": null,
+        "expenseNote": "Expense terms unknown \u2014 assumed the tenant pays its share",
+        "leverage": {
+          "call": "NO_LEASE",
+          "reason": "No lease in the package \u2014 get it to see if the area can be corrected",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": null,
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": null
+      },
+      {
+        "tenantId": "t-4",
+        "name": "Apex Roofing",
+        "suite": "Suite 140",
+        "billedRsf": 1425.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 2468.64,
+        "bomaUsf": 1893.0,
+        "deltaSF": 1043.64,
+        "deltaPct": 73.24,
+        "billedLoadFactor": 0.753,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 8.382,
+        "rentPSF": 12.63,
+        "baseRentGap": 13182.82,
+        "billedCam": 12704.65,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 22009.27,
+        "camGap": 9304.62,
+        "totalGap": 22487.44,
+        "correctedAnnualRent": 31182.82,
+        "recoversExpenses": null,
+        "expenseNote": "Expense terms unknown \u2014 assumed the tenant pays its share",
+        "leverage": {
+          "call": "NO_LEASE",
+          "reason": "No lease in the package \u2014 get it to see if the area can be corrected",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": null,
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": null
+      },
+      {
+        "tenantId": "t-5",
+        "name": "Bank of America",
+        "suite": "Suite 200",
+        "billedRsf": 10508.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 10548.77,
+        "bomaUsf": 8089.0,
+        "deltaSF": 40.77,
+        "deltaPct": 0.39,
+        "billedLoadFactor": 1.299,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 35.817,
+        "rentPSF": 9.9,
+        "baseRentGap": 403.62,
+        "billedCam": 93684.54,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 94048.02,
+        "camGap": 363.49,
+        "totalGap": 767.11,
+        "correctedAnnualRent": 104432.82,
+        "recoversExpenses": true,
+        "expenseNote": null,
+        "leverage": {
+          "call": "MATCHES",
+          "reason": "Billed area is within 2% of BOMA",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": "Net Lease - pro-rata share of operating expenses and taxes",
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": "boa_lease.txt"
+      },
+      {
+        "tenantId": "t-6",
+        "name": "Retrev Legal",
+        "suite": "Suite 301",
+        "billedRsf": 9874.0,
+        "billedRsfSource": "rent roll",
+        "bomaRsf": 11160.38,
+        "bomaUsf": 8558.0,
+        "deltaSF": 1286.38,
+        "deltaPct": 13.03,
+        "billedLoadFactor": 1.154,
+        "bomaLoadFactor": 1.304,
+        "billedShare": null,
+        "billedShareSource": null,
+        "bomaShare": 37.894,
+        "rentPSF": 13.37,
+        "baseRentGap": 17196.9,
+        "billedCam": 88032.08,
+        "billedCamBasis": "estimated (billed SF \u00d7 pool rate)",
+        "correctCam": 99500.86,
+        "camGap": 11468.78,
+        "totalGap": 28665.67,
+        "correctedAnnualRent": 149196.9,
+        "recoversExpenses": null,
+        "expenseNote": "Expense terms unknown \u2014 assumed the tenant pays its share",
+        "leverage": {
+          "call": "NO_LEASE",
+          "reason": "No lease in the package \u2014 get it to see if the area can be corrected",
+          "clause": null
+        },
+        "terms": {
+          "expense_structure_text": null,
+          "cam_cap": null,
+          "recoverable": null,
+          "exclusions": null,
+          "admin_fee": null,
+          "gross_up": null,
+          "base_year": null,
+          "lease_share": null,
+          "lease_share_basis": null
+        },
+        "leaseFile": null
+      }
+    ],
+    "summary": {
+      "suitesMeasured": 6,
+      "suitesUnderbilled": 5,
+      "suitesOverbilled": 0,
+      "underbilledSF": 3344.43,
+      "overbilledSF": 0,
+      "baseRentUpside": 44743.95,
+      "camUpside": 29817.42,
+      "totalUpside": 74561.36,
+      "collectibleUpside": null,
+      "pendingUpside": 74561.36,
+      "overbilledExposure": null,
+      "expensePool": 262576.32,
+      "expensePoolBasis": "Operating expenses annualized from period (August 2025, management report) \u2014 all categories, before lease exclusions",
+      "camRatePSF": 8.92,
+      "bomaLoadFactor": 1.304,
+      "billedLoadFactor": 1.148,
+      "leverage": {
+        "NO_LEASE": 5,
+        "MATCHES": 1
+      }
+    }
+  },
+  "financialSummary": {
+    "totalAnnualRent": 296029.2,
+    "averageRentPSF": 11.91,
+    "noi": 218993.28,
+    "noiBasis": "Annualized from year-to-date NOI (Jan-Aug 2025, management report)",
+    "capRate": null,
+    "capRateBasis": null,
+    "vacancy": 0.0,
+    "arDelinquency": 18360.17,
+    "camRecoveryRatio": 103.2
+  },
+  "walt": 12.5,
+  "waltCoverage": 55.4,
+  "buildingRsf": 29451.52,
+  "vacantRsf": 0.0,
+  "redFlags": [
+    {
+      "severity": "HIGH",
+      "category": "RSF Discrepancy",
+      "description": "BOMA (29,452 SF) exceeds the rent roll (24,847 SF) by 4,605 SF (18.5%)",
+      "impact": "About $95,931/yr may not be billed: $54,859 base rent at $11.91/SF plus $41,072 CAM at $8.92/SF",
+      "resolution": "Confirm which measurement the leases reference; request remeasurement or adjust pricing",
+      "source": "computed",
+      "id": "rf-1"
+    },
+    {
+      "severity": "HIGH",
+      "category": "Missing Expiry",
+      "description": "Retrev Legal (Suite 301) has no documented expiration",
+      "impact": "Rollover risk can't be assessed for 45% of rent",
+      "resolution": "Request the executed lease and any amendments for Retrev Legal",
+      "source": "computed",
+      "id": "rf-2"
+    },
+    {
+      "severity": "HIGH",
+      "category": "AR Delinquency",
+      "description": "Retrev Legal has $18,360 past due 60+ days \u2014 Tenant only paying $15,000/month vs $20,349.83 owed",
+      "impact": "Collection risk on 45% of rent",
+      "resolution": "Request payment history and confirm the balance with management",
+      "source": "computed",
+      "id": "rf-3"
+    },
+    {
+      "severity": "HIGH",
+      "category": "Expired Since Report",
+      "description": "2 lease(s) ran out after the 2025-08-20 report: Apex Roofing (2025-10-31), Doreen McClung (2026-05-31)",
+      "impact": "9% of rent \u2014 renewed, holding over, or gone is unknown",
+      "resolution": "Request a current rent roll and any renewals signed since the report",
+      "source": "computed",
+      "id": "rf-4"
+    },
+    {
+      "severity": "HIGH",
+      "category": "Suite Area Underbilled",
+      "description": "5 suite(s) billed on 3,344 SF less than BOMA measured: Retrev Legal 9,874 vs 11,160 SF; Apex Roofing 1,425 vs 2,469 SF; Complete Apartment Care 1,700 vs 2,076 SF; Doreen McClung 560 vs 882 SF; Feldmann Agency 780 vs 1,097 SF",
+      "impact": "$74,561/yr ($44,744 base rent + $29,817 CAM) not collected. Leverage: 5 no lease on file",
+      "resolution": "See the Lease Audit tab for each lease's remeasurement terms; correct the area where the lease allows it and price the rest into renewals",
+      "source": "computed",
+      "id": "rf-5"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Near-term Expiry",
+      "description": "Feldmann Agency expires 2027-01-31 (2 months)",
+      "impact": "4% of rent rolls within a year of today",
+      "resolution": "Ask about renewal status with Feldmann Agency",
+      "source": "computed",
+      "id": "rf-6"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Near-term Expiry",
+      "description": "Complete Apartment Care expires 2027-01-31 (2 months)",
+      "impact": "8% of rent rolls within a year of today",
+      "resolution": "Ask about renewal status with Complete Apartment Care",
+      "source": "computed",
+      "id": "rf-7"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Tenant Concentration",
+      "description": "Bank of America pays 35% of rent",
+      "impact": "Loss of this tenant would materially cut income",
+      "resolution": "Review Bank of America's credit, guarantor, and renewal options",
+      "source": "computed",
+      "id": "rf-8"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Tenant Concentration",
+      "description": "Retrev Legal pays 45% of rent",
+      "impact": "Loss of this tenant would materially cut income",
+      "resolution": "Review Retrev Legal's credit, guarantor, and renewal options",
+      "source": "computed",
+      "id": "rf-9"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Stale Data",
+      "description": "The rent roll / management report is dated 2025-08-20 (14 months old)",
+      "impact": "Tenants, balances, and vacancy may have changed since",
+      "resolution": "Request a current rent roll and AR aging",
+      "source": "computed",
+      "id": "rf-10"
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "Renewal Leverage",
+      "description": "Bank of America holds seven renewal options at fixed notice",
+      "impact": "Anchor controls term for decades",
+      "resolution": "Review option rent terms",
+      "source": "ai_review",
+      "sourceDocuments": [
+        "boa_lease.txt"
+      ],
+      "id": "rf-11"
+    }
+  ],
+  "whatToGetNext": [
+    "Leases for Retrev Legal, Apex Roofing, Complete Apartment Care, Doreen McClung and others \u2014 their remeasurement terms decide whether $74,561/yr can be collected (Retrev Legal also has no expiration on file)",
+    "Last year's CAM reconciliation \u2014 the exact expense pool and each tenant's billed share",
+    "Tenant estoppel certificates \u2014 Confirms rent and term from each tenant"
+  ],
+  "tenants": [
+    {
+      "id": "t-1",
+      "name": "Doreen McClung",
+      "suite": "Suite 100",
+      "rsf": 560.0,
+      "rentRollRsf": 560.0,
+      "leaseRsf": null,
+      "bomaRsf": 881.56,
+      "rsfDelta": 321.56,
+      "monthlyRent": 700.0,
+      "annualRent": 8400.0,
+      "rentPSF": 15.0,
+      "leaseStart": "2021-06-01",
+      "leaseExpiry": "2026-05-31",
+      "monthsRemaining": -6,
+      "monthToMonth": false,
+      "incomeConcentration": 2.8,
+      "riskLevel": "HIGH",
+      "arStatus": "CURRENT",
+      "arBalance": 0,
+      "arOver60": 0,
+      "arNote": null,
+      "hasLease": false,
+      "sources": [
+        "rent_roll",
+        "boma"
+      ]
+    },
+    {
+      "id": "t-2",
+      "name": "Feldmann Agency",
+      "suite": "Suite 120",
+      "rsf": 780.0,
+      "rentRollRsf": 780.0,
+      "leaseRsf": null,
+      "bomaRsf": 1096.74,
+      "rsfDelta": 316.74,
+      "monthlyRent": 950.0,
+      "annualRent": 11400.0,
+      "rentPSF": 14.62,
+      "leaseStart": "2022-02-01",
+      "leaseExpiry": "2027-01-31",
+      "monthsRemaining": 2,
+      "monthToMonth": false,
+      "incomeConcentration": 3.9,
+      "riskLevel": "HIGH",
+      "arStatus": "CURRENT",
+      "arBalance": 0,
+      "arOver60": 0,
+      "arNote": "Prepaid credit",
+      "hasLease": false,
+      "sources": [
+        "rent_roll",
+        "boma",
+        "ar_aging"
+      ]
+    },
+    {
+      "id": "t-3",
+      "name": "Complete Apartment Care",
+      "suite": "Suite 130",
+      "rsf": 1700.0,
+      "rentRollRsf": 1700.0,
+      "leaseRsf": null,
+      "bomaRsf": 2076.11,
+      "rsfDelta": 376.11,
+      "monthlyRent": 1850.0,
+      "annualRent": 22200.0,
+      "rentPSF": 13.06,
+      "leaseStart": "2022-02-01",
+      "leaseExpiry": "2027-01-31",
+      "monthsRemaining": 2,
+      "monthToMonth": false,
+      "incomeConcentration": 7.5,
+      "riskLevel": "HIGH",
+      "arStatus": "CURRENT",
+      "arBalance": 0,
+      "arOver60": 0,
+      "arNote": null,
+      "hasLease": false,
+      "sources": [
+        "rent_roll",
+        "boma"
+      ]
+    },
+    {
+      "id": "t-4",
+      "name": "Apex Roofing",
+      "suite": "Suite 140",
+      "rsf": 1425.0,
+      "rentRollRsf": 1425.0,
+      "leaseRsf": null,
+      "bomaRsf": 2468.64,
+      "rsfDelta": 1043.64,
+      "monthlyRent": 1500.0,
+      "annualRent": 18000.0,
+      "rentPSF": 12.63,
+      "leaseStart": "2020-11-01",
+      "leaseExpiry": "2025-10-31",
+      "monthsRemaining": -13,
+      "monthToMonth": false,
+      "incomeConcentration": 6.1,
+      "riskLevel": "HIGH",
+      "arStatus": "CURRENT",
+      "arBalance": 0,
+      "arOver60": 0,
+      "arNote": "Prepaid credit",
+      "hasLease": false,
+      "sources": [
+        "rent_roll",
+        "boma",
+        "ar_aging"
+      ]
+    },
+    {
+      "id": "t-5",
+      "name": "Bank of America",
+      "suite": "Suite 200",
+      "rsf": 10508.0,
+      "rentRollRsf": 10508.0,
+      "leaseRsf": 10508.0,
+      "bomaRsf": 10548.77,
+      "rsfDelta": 40.77,
+      "monthlyRent": 8669.1,
+      "annualRent": 104029.2,
+      "rentPSF": 9.9,
+      "leaseStart": "2012-12-01",
+      "leaseExpiry": "2028-06-30",
+      "monthsRemaining": 19,
+      "monthToMonth": false,
+      "incomeConcentration": 35.1,
+      "riskLevel": "MEDIUM",
+      "arStatus": "CURRENT",
+      "arBalance": 0,
+      "arOver60": 0,
+      "arNote": null,
+      "hasLease": true,
+      "sources": [
+        "rent_roll",
+        "lease",
+        "boma"
+      ]
+    },
+    {
+      "id": "t-6",
+      "name": "Retrev Legal",
+      "suite": "Suite 301",
+      "rsf": 9874.0,
+      "rentRollRsf": 9874.0,
+      "leaseRsf": null,
+      "bomaRsf": 11160.38,
+      "rsfDelta": 1286.38,
+      "monthlyRent": 11000.0,
+      "annualRent": 132000.0,
+      "rentPSF": 13.37,
+      "leaseStart": "2019-03-01",
+      "leaseExpiry": null,
+      "monthsRemaining": null,
+      "monthToMonth": false,
+      "incomeConcentration": 44.6,
+      "riskLevel": "HIGH",
+      "arStatus": "DELINQUENT",
+      "arBalance": 30268.31,
+      "arOver60": 18360.17,
+      "arNote": "Tenant only paying $15,000/month vs $20,349.83 owed",
+      "hasLease": false,
+      "sources": [
+        "rent_roll",
+        "boma",
+        "ar_aging"
+      ]
+    }
+  ],
+  "leaseAbstracts": [
+    {
+      "id": "la-1",
+      "tenantName": "Bank of America, National Association",
+      "suite": "200",
+      "rsf": 10508.0,
+      "commencementDate": "2012-12-01",
+      "expirationDate": "2028-06-30",
+      "baseRent": 104029.2,
+      "escalation": "Unknown",
+      "expenseStructure": "NNN",
+      "expenseStructureText": "Net Lease - pro-rata share of operating expenses and taxes",
+      "camCap": null,
+      "renewalOptions": "One 5.5-year term, then six 5-year terms; 12 months' notice",
+      "tiAllowance": null,
+      "remeasurementRights": false,
+      "missingFields": [],
+      "confidence": 0.57,
+      "sourceFile": "boa_lease.txt"
+    }
+  ],
+  "documents": [
+    {
+      "id": "doc-1",
+      "filename": "stirling_aug_2025.txt",
+      "type": "MANAGEMENT_REPORT",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-05T15:00:00Z",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "PROCESSED",
+      "note": null,
+      "carried": false
+    },
+    {
+      "id": "doc-2",
+      "filename": "boa_lease.txt",
+      "type": "LEASE",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-05T15:00:00Z",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "PROCESSED",
+      "note": null,
+      "carried": false
+    },
+    {
+      "id": "doc-3",
+      "filename": "boma_measurements.csv",
+      "type": "BOMA",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-05T15:00:00Z",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "PROCESSED",
+      "note": null,
+      "carried": false
+    },
+    {
+      "id": "doc-4",
+      "filename": "escambia_pa.txt",
+      "type": "COUNTY_PA",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-05T15:00:00Z",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "PROCESSED",
+      "note": null,
+      "carried": false
+    },
+    {
+      "id": "doc-5",
+      "filename": "site_photo_notes.txt",
+      "type": "OTHER",
+      "classificationConfidence": 0.95,
+      "uploadedAt": "2026-11-05T15:00:00Z",
+      "pageCount": 1,
+      "ocr": false,
+      "status": "SKIPPED",
+      "note": "Not a supported document type",
+      "carried": false
+    }
+  ],
+  "arithmeticChecks": [
+    {
+      "label": "Rent roll total RSF",
+      "status": "pass",
+      "stated": 24847.0,
+      "computed": 24847.0,
+      "deltaPct": 0.0,
+      "formula": "sum(tenant RSF) + vacant RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent roll occupied RSF",
+      "status": "pass",
+      "stated": 24847.0,
+      "computed": 24847.0,
+      "deltaPct": 0.0,
+      "formula": "sum(occupied tenant RSF)",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent roll total annual rent",
+      "status": "pass",
+      "stated": 296029.2,
+      "computed": 296029.2,
+      "deltaPct": 0.0,
+      "formula": "sum(tenant annual base rent)",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent roll occupancy",
+      "status": "pass",
+      "stated": 100.0,
+      "computed": 100.0,
+      "deltaPct": 0.0,
+      "formula": "occupied RSF \u00f7 total RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Doreen McClung",
+      "status": "pass",
+      "stated": 8400.0,
+      "computed": 8400.0,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Doreen McClung",
+      "status": "pass",
+      "stated": 15.0,
+      "computed": 15.0,
+      "deltaPct": 0.0,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Feldmann Agency",
+      "status": "pass",
+      "stated": 11400.0,
+      "computed": 11400.0,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Feldmann Agency",
+      "status": "pass",
+      "stated": 14.62,
+      "computed": 14.62,
+      "deltaPct": 0.03,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Complete Apartment Care",
+      "status": "pass",
+      "stated": 22200.0,
+      "computed": 22200.0,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Complete Apartment Care",
+      "status": "pass",
+      "stated": 13.06,
+      "computed": 13.06,
+      "deltaPct": 0.01,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Apex Roofing",
+      "status": "pass",
+      "stated": 18000.0,
+      "computed": 18000.0,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Apex Roofing",
+      "status": "pass",
+      "stated": 12.63,
+      "computed": 12.63,
+      "deltaPct": 0.01,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Bank of America",
+      "status": "pass",
+      "stated": 104029.2,
+      "computed": 104029.2,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Bank of America",
+      "status": "pass",
+      "stated": 9.9,
+      "computed": 9.9,
+      "deltaPct": 0.0,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Annual rent \u2014 Retrev Legal",
+      "status": "pass",
+      "stated": 132000.0,
+      "computed": 132000.0,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Rent PSF \u2014 Retrev Legal",
+      "status": "pass",
+      "stated": 13.37,
+      "computed": 13.37,
+      "deltaPct": 0.01,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Lease annual rent \u2014 Bank of America, National Association",
+      "status": "pass",
+      "stated": 104029.2,
+      "computed": 104029.2,
+      "deltaPct": 0.0,
+      "formula": "monthly rent \u00d7 12",
+      "detail": null,
+      "source": "boa_lease.txt"
+    },
+    {
+      "label": "Lease rent PSF \u2014 Bank of America, National Association",
+      "status": "pass",
+      "stated": 9.9,
+      "computed": 9.9,
+      "deltaPct": 0.0,
+      "formula": "annual rent \u00f7 RSF",
+      "detail": null,
+      "source": "boa_lease.txt"
+    },
+    {
+      "label": "BOMA suites vs building total",
+      "status": "warning",
+      "stated": 29451.52,
+      "computed": 28232.2,
+      "deltaPct": 4.14,
+      "formula": "sum(suite rentable SF)",
+      "detail": "Stated 29,451.52 SF, computed 28,232.20 SF (4.1% off). Remaining area may be unlisted suites or building common area.",
+      "source": "boma_measurements.csv"
+    },
+    {
+      "label": "NOI (period)",
+      "status": "pass",
+      "stated": 25327.82,
+      "computed": 25327.82,
+      "deltaPct": 0.0,
+      "formula": "total revenue \u2212 operating expenses",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    },
+    {
+      "label": "Bank reconciliation",
+      "status": "pass",
+      "stated": 0.0,
+      "computed": 0.0,
+      "deltaPct": null,
+      "formula": "bank balance \u2212 GL balance",
+      "detail": null,
+      "source": "stirling_aug_2025.txt"
+    }
+  ],
+  "expirySchedule": [
+    {
+      "label": "Expired",
+      "annualRent": 26400.0,
+      "tenants": [
+        "Doreen McClung",
+        "Apex Roofing"
+      ]
+    },
+    {
+      "label": "2026",
+      "annualRent": 0.0,
+      "tenants": []
+    },
+    {
+      "label": "2027",
+      "annualRent": 33600.0,
+      "tenants": [
+        "Feldmann Agency",
+        "Complete Apartment Care"
+      ]
+    },
+    {
+      "label": "2028",
+      "annualRent": 104029.2,
+      "tenants": [
+        "Bank of America"
+      ]
+    },
+    {
+      "label": "2029",
+      "annualRent": 0.0,
+      "tenants": []
+    },
+    {
+      "label": "2030",
+      "annualRent": 0.0,
+      "tenants": []
+    },
+    {
+      "label": "2031",
+      "annualRent": 0.0,
+      "tenants": []
+    },
+    {
+      "label": "2032+",
+      "annualRent": 0.0,
+      "tenants": []
+    },
+    {
+      "label": "Unknown",
+      "annualRent": 132000.0,
+      "tenants": [
+        "Retrev Legal"
+      ]
+    }
+  ],
+  "pipelineErrors": [],
+  "isSample": true
+}

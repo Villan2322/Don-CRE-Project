@@ -1,220 +1,275 @@
-import fastapi
-import fastapi.middleware.cors
-from fastapi import UploadFile, File, Form, HTTPException
-from typing import Optional
+"""
+CRE Document Intelligence server.
+
+One process serves both the API (under /api) and the built dashboard (static
+files from STATIC_DIR). An analysis runs as a background job: POST /api/analyze
+returns a job id right away, and the browser polls GET /api/jobs/{id}. Every
+request stays short, so no proxy timeout can cut off a long run.
+
+Jobs live in memory. Run a single instance; a restart drops in-flight jobs
+(finished results are already saved in the user's browser).
+"""
+
+import asyncio
+import base64
+import binascii
+import json
+import logging
+import secrets
+import os
+import time
+import urllib.request
 import uuid
+from contextlib import asynccontextmanager
+from datetime import date
+from pathlib import Path
+from typing import Optional
 
-from models.schemas import (
-    UploadResponse,
-    AnalysisRequest,
-    AnalysisResponse,
-    ProcessingStatus,
-    ProcessedDocument,
-    AnalysisResult,
-)
-from services.document_processor import processor
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from agents.base import DEFAULT_MODEL, fatal_api_message, make_client
 from graph import graph
+from services.deal_metrics import merge_prior
+from state import initial_state
 
-app = fastapi.FastAPI(
-    title="CRE Document Intelligence API",
-    description="AI-powered document analysis for commercial real estate due diligence",
-    version="1.0.0"
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("cre.api")
+
+MAX_FILES = int(os.environ.get("MAX_FILES", 25))
+MAX_DOCS_PER_DEAL = int(os.environ.get("MAX_DOCS_PER_DEAL", 60))
+MAX_UPLOAD_MB = float(os.environ.get("MAX_UPLOAD_MB", 100))
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_ANALYSES", 3))
+JOB_TTL_SECONDS = 6 * 3600
+STATIC_DIR = os.environ.get("STATIC_DIR", str(Path(__file__).resolve().parent.parent / "frontend" / "out"))
+
+# What the user sees while each step runs (keyed by the step that just finished).
+NEXT_STAGE = {
+    "ingest_documents": "Classifying documents",
+    "classify_documents": "Extracting data",
+    "extract_document": "Extracting data",
+    "compute_metrics": "AI review",
+    "synthesize": "Scoring",
+    "build_report": "Finishing",
+}
+
+# Keep-awake. Render's free plan stops a service after 15 idle minutes and takes about a
+# minute to wake it. Render sets RENDER_EXTERNAL_URL; visiting our own public /health on a
+# timer goes through Render's front door, which counts as traffic. KEEP_AWAKE_MINUTES=0 turns it off.
+KEEP_AWAKE_URL = os.environ.get("KEEP_AWAKE_URL") or os.environ.get("RENDER_EXTERNAL_URL", "")
+KEEP_AWAKE_MINUTES = float(os.environ.get("KEEP_AWAKE_MINUTES", 10))
+
+
+def _ping(url: str) -> int:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "keep-awake"}), timeout=30) as r:
+        return r.status
+
+
+async def keep_awake(url: str, every_seconds: float) -> None:
+    target = url.rstrip("/") + "/health"
+    log.info("keep-awake: pinging %s every %.0f min", target, every_seconds / 60)
+    while True:
+        await asyncio.sleep(every_seconds)
+        try:
+            await asyncio.to_thread(_ping, target)
+        except Exception as e:  # a missed ping just means one chance to sleep; try again next time
+            log.warning("keep-awake ping failed: %s", e)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = None
+    if KEEP_AWAKE_URL and KEEP_AWAKE_MINUTES > 0:
+        task = asyncio.create_task(keep_awake(KEEP_AWAKE_URL, KEEP_AWAKE_MINUTES * 60))
+    yield
+    if task:
+        task.cancel()
+
+
+app = FastAPI(
+    title="CRE Document Intelligence",
+    description="AI-assisted document analysis for commercial real estate due diligence",
+    version="3.0.0",
+    lifespan=lifespan,
 )
+# Login. When APP_PASSWORD is set, every page and API call needs it (HTTP basic auth,
+# which the browser prompts for). Only /health stays open for the platform's checks.
+APP_USER = os.environ.get("APP_USER", "don")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+if not APP_PASSWORD:
+    log.warning("APP_PASSWORD is not set — the app is open to anyone who can reach it")
+
+
+def _authorized(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic":
+        return False
+    try:
+        user, _, password = base64.b64decode(encoded).decode("utf-8").partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    return secrets.compare_digest(user.encode(), APP_USER.encode()) & \
+        secrets.compare_digest(password.encode(), APP_PASSWORD.encode())
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    if APP_PASSWORD and request.url.path != "/health" and not _authorized(request.headers.get("authorization", "")):
+        return Response("Login required", status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="CRE Intelligence", charset="UTF-8"'})
+    return await call_next(request)
+
 
 app.add_middleware(
-    fastapi.middleware.cors.CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    CORSMiddleware,
+    allow_origins=[o for o in os.environ.get("CORS_ORIGINS", "").split(",") if o],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "ok", "service": "cre-document-intelligence"}
-
-
-@app.post("/documents/upload", response_model=UploadResponse)
-async def upload_document(file: UploadFile = File(...)) -> UploadResponse:
-    """
-    Upload a document for processing.
-    
-    Supported formats:
-    - PDF (leases, reports)
-    - Excel (rent rolls, financial data)
-    - CSV (tabular data)
-    """
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-    
-    content_type = file.content_type or "application/octet-stream"
-    
-    # Read file content
-    file_content = await file.read()
-    
-    # Process document
-    doc = await processor.process_document(
-        filename=file.filename,
-        file_content=file_content,
-        content_type=content_type
-    )
-    
-    return UploadResponse(
-        message=f"Document '{file.filename}' uploaded and classified as {doc.document_type.value}",
-        document_id=doc.id,
-        status=doc.status
-    )
+api = APIRouter(prefix="/api")
+_jobs: dict[str, dict] = {}
+_slots = asyncio.Semaphore(MAX_CONCURRENT)
+_tasks: set[asyncio.Task] = set()
 
 
-@app.get("/documents", response_model=list[ProcessedDocument])
-async def list_documents() -> list[ProcessedDocument]:
-    """List all uploaded documents."""
-    return list(processor.documents.values())
+def _prune_jobs() -> None:
+    cutoff = time.time() - JOB_TTL_SECONDS
+    for job_id in [j for j, job in _jobs.items() if job["created"] < cutoff]:
+        _jobs.pop(job_id, None)
 
 
-@app.get("/documents/{document_id}", response_model=ProcessedDocument)
-async def get_document(document_id: str) -> ProcessedDocument:
-    """Get details of a specific document."""
-    if document_id not in processor.documents:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return processor.documents[document_id]
+async def _run(job_id: str, state: dict) -> None:
+    job = _jobs[job_id]
+    try:
+        async with _slots:
+            job.update(status="running", stage="Reading documents")
+            final = None
+            async for mode, chunk in graph.astream(state, stream_mode=["updates", "values"]):
+                if mode == "updates":
+                    for node in chunk:
+                        job["stage"] = NEXT_STAGE.get(node, job["stage"])
+                else:
+                    final = chunk
+        job.update(status="done", stage="Done", result={
+            "deal_id": job_id,
+            "deal_name": final["deal_name"],
+            "pipeline_stage": final.get("pipeline_stage"),
+            "errors": final.get("ingest_errors", []) + final.get("pipeline_errors", []),
+            "analysis": final.get("report"),
+        })
+        for err in job["result"]["errors"]:
+            log.warning("job %s: %s", job_id, err)
+        log.info("job %s done: %s (%d problem(s))", job_id, final.get("pipeline_stage"), len(job["result"]["errors"]))
+    except Exception as e:  # never leave a job stuck in "running"
+        log.exception("job %s failed", job_id)
+        job.update(status="failed", error=fatal_api_message(e) or f"The analysis failed: {e}")
 
 
-@app.post("/analyze")
+@api.get("/health")
+async def health(verify: bool = False) -> dict:
+    """Add ?verify=true to make one tiny Claude call and confirm the key actually works."""
+    out = {
+        "status": "ok",
+        "anthropic_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "workspace_header": bool(os.environ.get("ANTHROPIC_WORKSPACE_ID")),
+        "jobs_in_memory": len(_jobs),
+    }
+    if verify:
+        try:
+            await make_client().messages.create(
+                model=os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL), max_tokens=1,
+                messages=[{"role": "user", "content": "ok"}])
+            out["anthropic_key_works"] = True
+        except Exception as e:
+            out["anthropic_key_works"] = False
+            out["anthropic_error"] = str(e)[:400]
+    return out
+
+
+@api.post("/analyze", status_code=202)
 async def analyze_deal(
     deal_name: str = Form(...),
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(default=[]),
+    as_of: Optional[str] = Form(None),
+    prior: Optional[UploadFile] = File(None),
 ) -> dict:
+    """Start an analysis. Poll GET /api/jobs/{job_id} for the result.
+
+    prior: the `carry` object from an earlier result of this deal, as a JSON file. Its documents
+    are kept as already read; only `files` are new. Send it with no files to re-run after
+    removing a document.
     """
-    Run full AI analysis pipeline on uploaded documents using LangGraph.
-    
-    This orchestrates all AI agents:
-    1. Document Ingestion & OCR
-    2. Document Classification
-    3. Universal Extraction
-    4. Synthesis
-    5. Arithmetic Verification
-    6. RSF Reconciliation
-    7. Red Flag Detection
-    8. Risk Scoring
-    """
-    deal_id = str(uuid.uuid4())
-    raw_files = {}
-    content_types = {}
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, "ANTHROPIC_API_KEY is not set on the server.")
+    if len(files) > MAX_FILES:
+        raise HTTPException(400, f"Upload at most {MAX_FILES} files per analysis.")
+    if as_of:
+        try:
+            date.fromisoformat(as_of)
+        except ValueError:
+            raise HTTPException(400, "as_of must be YYYY-MM-DD")
+
+    raw_files: dict[str, bytes] = {}
+    content_types: dict[str, str] = {}
+    total = 0
     for f in files:
         if not f.filename:
             continue
-        raw_files[f.filename] = await f.read()
-        content_types[f.filename] = f.content_type or "application/octet-stream"
+        name = f.filename
+        if name in raw_files:  # two files with the same name — keep both
+            stem, dot, ext = name.rpartition(".")
+            name = f"{stem or ext} ({len(raw_files) + 1}){dot}{ext if stem else ''}"
+        data = await f.read()
+        total += len(data)
+        if total > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(413, f"Upload is over {MAX_UPLOAD_MB:g} MB.")
+        raw_files[name] = data
+        content_types[name] = f.content_type or "application/octet-stream"
+    carried = None
+    if prior is not None:
+        try:
+            carried = merge_prior(json.loads(await prior.read()), set(raw_files))
+        except (ValueError, json.JSONDecodeError) as e:
+            raise HTTPException(400, str(e) if isinstance(e, ValueError) and not isinstance(e, json.JSONDecodeError)
+                                else "Saved documents could not be read.")
+    if not raw_files and not (carried and carried["documents"]):
+        raise HTTPException(400, "No files provided")
+    if len(raw_files) + len(carried["documents"] if carried else []) > MAX_DOCS_PER_DEAL:
+        raise HTTPException(400, f"A deal can hold at most {MAX_DOCS_PER_DEAL} documents.")
 
-    if not raw_files:
-        raise HTTPException(status_code=400, detail="No files provided")
-
-    initial_state = {
-        "deal_id": deal_id, "deal_name": deal_name,
-        "raw_files": raw_files, "file_content_types": content_types,
-        "raw_documents": [], "ingest_errors": [],
-        "classified_documents": [], "classification_errors": [],
-        "extractions": [], "extraction_errors": [],
-        "synthesis": {}, "rsf_recovery": {}, "score_summary": {},
-        "synthesis_error": None, "arithmetic_verification": {},
-        "rent_roll_analysis": {}, "rsf_reconciliation": {},
-        "red_flags_result": {}, "deal_score_result": {},
-        "completeness_result": {}, "pipeline_stage": "pending",
-        "pipeline_errors": [], "completed_at": None,
-    }
-
-    result = graph.invoke(initial_state)
-    processor.deals[deal_id] = {"result": result, "raw_data": result}
-
-    # Return FULL result directly since serverless can't persist state between calls
-    return {
-        "deal_id": deal_id,
-        "deal_name": deal_name,
-        "pipeline_stage": result.get("pipeline_stage"),
-        "overall_score": result.get("score_summary", {}).get("overall"),
-        "deal_readiness": result.get("score_summary", {}).get("deal_readiness"),
-        "documents_processed": len(result.get("extractions", [])),
-        "errors": result.get("pipeline_errors", []),
-        # Include full data for frontend transformation
-        "classified_documents": result.get("classified_documents", []),
-        "extractions": result.get("extractions", []),
-        "rent_roll_analysis": result.get("rent_roll_analysis", {}),
-        "rsf_reconciliation": result.get("rsf_reconciliation", {}),
-        "red_flags_result": result.get("red_flags_result", {}),
-        "score_summary": result.get("score_summary", {}),
-        "synthesis": result.get("synthesis", {}),
-        "completeness_result": result.get("completeness_result", {}),
-    }
+    _prune_jobs()
+    job_id = str(uuid.uuid4())
+    state = initial_state(job_id, deal_name.strip() or "Untitled Deal", raw_files, content_types, as_of, carried)
+    _jobs[job_id] = {"status": "queued", "stage": "Queued", "created": time.time(), "result": None, "error": None}
+    task = asyncio.create_task(_run(job_id, state))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    log.info("job %s queued: %s, %d file(s), %.1f MB", job_id, deal_name, len(raw_files), total / 1e6)
+    return {"job_id": job_id, "status": "queued"}
 
 
-@app.get("/deals/{deal_id}", response_model=AnalysisResult)
-async def get_deal_analysis(deal_id: str) -> AnalysisResult:
-    """Get the analysis result for a deal."""
-    if deal_id not in processor.deals:
-        raise HTTPException(status_code=404, detail="Deal analysis not found")
-    return processor.deals[deal_id]["result"]
+@api.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> dict:
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return {k: v for k, v in job.items() if not k.startswith("_") and k != "created"}
 
 
-@app.get("/deals/{deal_id}/raw")
-async def get_deal_raw_data(deal_id: str) -> dict:
-    """Get raw analysis data for debugging/detailed view."""
-    if deal_id not in processor.deals:
-        raise HTTPException(status_code=404, detail="Deal analysis not found")
-    return processor.deals[deal_id]["raw_data"]
+app.include_router(api)
 
 
-@app.delete("/documents/{document_id}")
-async def delete_document(document_id: str) -> dict:
-    """Delete an uploaded document."""
-    if document_id not in processor.documents:
-        raise HTTPException(status_code=404, detail="Document not found")
-    del processor.documents[document_id]
-    return {"message": "Document deleted", "document_id": document_id}
+@app.get("/health")
+async def root_health() -> dict:
+    """Liveness check for container platforms."""
+    return {"status": "ok"}
 
 
-@app.get("/agents")
-async def list_agents() -> dict:
-    """List available AI agents and their capabilities."""
-    return {
-        "agents": [
-            {
-                "name": "DocumentClassifierAgent",
-                "description": "Classifies documents by type (lease, rent roll, BOMA, etc.)",
-                "input": "Document text or file",
-                "output": "Document type, confidence, metadata"
-            },
-            {
-                "name": "LeaseAbstractionAgent",
-                "description": "Extracts 40+ structured fields from lease documents",
-                "input": "Lease document text",
-                "output": "Structured lease abstract with all key terms"
-            },
-            {
-                "name": "RentRollAgent",
-                "description": "Parses and normalizes rent roll data",
-                "input": "Rent roll (Excel/PDF)",
-                "output": "Normalized tenant list, summary metrics, issues"
-            },
-            {
-                "name": "RSFReconciliationAgent",
-                "description": "Reconciles square footage across sources",
-                "input": "Rent roll, leases, BOMA measurement",
-                "output": "Variance analysis, revenue impact"
-            },
-            {
-                "name": "RedFlagDetectionAgent",
-                "description": "Identifies deal risks and issues",
-                "input": "All analysis data",
-                "output": "Categorized red flags with severity and actions"
-            },
-            {
-                "name": "RiskScoringAgent",
-                "description": "Generates comprehensive deal score (0-100)",
-                "input": "Complete deal analysis",
-                "output": "Deal score, tier, sub-scores, recommendations"
-            }
-        ]
-    }
+# The dashboard. Mounted last so /api routes win.
+if Path(STATIC_DIR, "index.html").exists():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
+else:
+    log.warning("No dashboard build at %s — serving the API only", STATIC_DIR)

@@ -3,90 +3,71 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* White-labeled for Blue Commercial Properties, following bluecpm.com:
+   white pages, navy #00236E headings and bands, gold #F9C22E actions,
+   Montserrat throughout, gray body copy, square corners. */
 :root {
-  /* Dark theme by default for enterprise analytics dashboard */
-  --background: oklch(0.12 0 0);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.16 0.005 280);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.16 0.005 280);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.65 0.20 260);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.22 0 0);
-  --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.60 0 0);
-  --accent: oklch(0.22 0.01 260);
-  --accent-foreground: oklch(0.95 0 0);
-  --destructive: oklch(0.55 0.22 25);
-  --destructive-foreground: oklch(1 0 0);
-  --success: oklch(0.65 0.18 145);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.75 0.18 70);
-  --warning-foreground: oklch(0.15 0 0);
-  --border: oklch(0.26 0 0);
-  --input: oklch(0.22 0 0);
-  --ring: oklch(0.65 0.20 260);
-  /* Chart colors for data viz */
-  --chart-1: oklch(0.60 0.18 250);
-  --chart-2: oklch(0.65 0.18 145);
-  --chart-3: oklch(0.75 0.18 70);
-  --chart-4: oklch(0.65 0.22 320);
-  --chart-5: oklch(0.55 0.22 25);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.14 0 0);
-  --sidebar-foreground: oklch(0.95 0 0);
-  --sidebar-primary: oklch(0.65 0.20 260);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.20 0 0);
-  --sidebar-accent-foreground: oklch(0.95 0 0);
-  --sidebar-border: oklch(0.26 0 0);
-  --sidebar-ring: oklch(0.65 0.20 260);
-}
+  --brand-navy: #00236e;
+  --brand-navy-deep: #001a52;
+  --brand-gold: #f9c22e;
 
-.light {
-  --background: oklch(0.98 0 0);
-  --foreground: oklch(0.15 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0 0);
-  --primary: oklch(0.55 0.20 260);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0 0);
-  --secondary-foreground: oklch(0.15 0 0);
-  --muted: oklch(0.95 0 0);
-  --muted-foreground: oklch(0.45 0 0);
-  --accent: oklch(0.95 0.01 260);
-  --accent-foreground: oklch(0.15 0 0);
-  --destructive: oklch(0.55 0.22 25);
-  --destructive-foreground: oklch(1 0 0);
-  --success: oklch(0.55 0.18 145);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.65 0.18 70);
-  --warning-foreground: oklch(0.15 0 0);
-  --border: oklch(0.90 0 0);
-  --input: oklch(0.90 0 0);
-  --ring: oklch(0.55 0.20 260);
-  --chart-1: oklch(0.50 0.18 250);
-  --chart-2: oklch(0.55 0.18 145);
-  --chart-3: oklch(0.65 0.18 70);
-  --chart-4: oklch(0.55 0.22 320);
-  --chart-5: oklch(0.50 0.22 25);
-  --sidebar: oklch(0.98 0 0);
-  --sidebar-foreground: oklch(0.15 0 0);
-  --sidebar-primary: oklch(0.55 0.20 260);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.15 0 0);
-  --sidebar-border: oklch(0.90 0 0);
-  --sidebar-ring: oklch(0.55 0.20 260);
+  --background: #f7f8fa;
+  --foreground: #1b2433;
+  --card: #ffffff;
+  --card-foreground: #1b2433;
+  --popover: #ffffff;
+  --popover-foreground: #1b2433;
+  --primary: #00236e;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f3f7;
+  --secondary-foreground: #1b2433;
+  --muted: #f1f3f7;
+  --muted-foreground: #6b7280;
+  --accent: #eef2fa;
+  --accent-foreground: #00236e;
+  --gold: #f9c22e;
+  --gold-foreground: #00236e;
+  --destructive: #c0262d;
+  --destructive-foreground: #ffffff;
+  --success: #17804a;
+  --success-foreground: #ffffff;
+  --warning: #b3600a;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fff6e2;
+  --success-soft: #e9f6ef;
+  --destructive-soft: #fdeced;
+  --gold-soft: #fff8df;
+  --border: #e3e7ee;
+  --input: #d5dbe5;
+  --ring: #00236e;
+  --chart-1: #00236e;
+  --chart-2: #3e6fc4;
+  --chart-3: #f9c22e;
+  --chart-4: #9db5dd;
+  --chart-5: #b4bccb;
+  --radius: 0px;
+  --sidebar: #00236e;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #f9c22e;
+  --sidebar-primary-foreground: #00236e;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: #f9c22e;
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: 'Montserrat Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: 'Montserrat Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-success-soft: var(--success-soft);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-navy-deep: var(--brand-navy-deep);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -115,10 +96,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -135,5 +116,26 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-heading);
+    color: var(--brand-navy);
+  }
+  /* Section titles: light navy, as on bluecpm.com */
+  h2 {
+    font-weight: 300;
+  }
+  /* Small gray uppercase labels, like the site's section eyebrows */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-foreground);
+  }
+  /* Numbers line up in every table and stat. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 }

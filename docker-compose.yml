@@ -1,0 +1,33 @@
+# Runs the app behind Caddy, which gets an HTTPS certificate automatically
+# and asks for a username and password before anyone can see or use the app.
+#
+#   cp .env.example .env   # fill it in
+#   docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      APP_USER: ${APP_USER}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

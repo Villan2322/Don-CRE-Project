@@ -14,3 +14,11 @@ next.user-config.*
 node_modules
 .next/
 .DS_Store
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Local secrets and builds
+.env
+frontend/out/

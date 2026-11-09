@@ -1,26 +1,30 @@
 """
 Document Parsing Agent
-Handles document ingestion, text extraction, and OCR detection.
+
+Detects file type, pulls text out of text-based files, and decides when a
+file needs OCR (scanned PDFs, images). No LLM calls here.
 """
 
+import csv
 import io
 from dataclasses import dataclass
 from typing import Optional
 
-try:
-    import PyPDF2
-except ImportError:
-    PyPDF2 = None
+from pypdf import PdfReader
+import openpyxl
 
 try:
-    import openpyxl
-except ImportError:
-    openpyxl = None
+    import xlrd  # legacy .xls
+except ImportError:  # pragma: no cover
+    xlrd = None
+
+# A text PDF averages far more than this per page; scans average near zero.
+MIN_CHARS_PER_PAGE = 80
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
 @dataclass
 class ParseResult:
-    """Result of document parsing check."""
     is_parseable: bool
     file_type: str
     extracted_text: str
@@ -31,211 +35,89 @@ class ParseResult:
 
 
 class DocumentParsingAgent:
-    """Agent for document parsing and text extraction."""
-    
     def __init__(self):
         self.name = "DocumentParsingAgent"
-    
-    def check(
-        self,
-        filename: str,
-        file_content: bytes,
-        content_type: str
-    ) -> ParseResult:
-        """
-        Check if a document can be parsed and extract text if possible.
-        Returns ParseResult with extracted text or OCR requirement.
-        """
-        filename_lower = filename.lower()
-        
-        # PDF handling
-        if filename_lower.endswith('.pdf') or content_type == 'application/pdf':
-            return self._parse_pdf(file_content, filename)
-        
-        # Excel handling
-        if filename_lower.endswith(('.xlsx', '.xls')) or 'spreadsheet' in content_type or 'excel' in content_type:
-            return self._parse_excel(file_content, filename)
-        
-        # CSV handling
-        if filename_lower.endswith('.csv') or content_type == 'text/csv':
-            return self._parse_csv(file_content, filename)
-        
-        # Text handling
-        if filename_lower.endswith('.txt') or content_type.startswith('text/'):
-            return self._parse_text(file_content, filename)
-        
-        # Image handling - needs OCR
-        if filename_lower.endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')) or content_type.startswith('image/'):
-            return ParseResult(
-                is_parseable=True,
-                file_type="image",
-                extracted_text="",
-                page_count=1,
-                needs_ocr=True,
-                method="ocr_required",
-                reason="Image file requires OCR processing"
-            )
-        
-        return ParseResult(
-            is_parseable=False,
-            file_type="unknown",
-            extracted_text="",
-            page_count=None,
-            needs_ocr=False,
-            method="none",
-            reason=f"Unsupported file type: {content_type}"
-        )
-    
-    def _parse_pdf(self, file_content: bytes, filename: str) -> ParseResult:
-        """Extract text from PDF."""
-        if PyPDF2 is None:
-            return ParseResult(
-                is_parseable=True,
-                file_type="pdf",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=True,
-                method="ocr_fallback",
-                reason="PyPDF2 not available, falling back to OCR"
-            )
-        
+
+    def check(self, filename: str, file_content: bytes, content_type: str) -> ParseResult:
+        name = filename.lower()
+        content_type = content_type or ""
+        if name.endswith(".pdf") or content_type == "application/pdf":
+            return self._parse_pdf(file_content)
+        if name.endswith(".xlsx") or name.endswith(".xlsm"):
+            return self._parse_xlsx(file_content)
+        if name.endswith(".xls"):
+            return self._parse_xls(file_content)
+        if name.endswith(".csv") or content_type == "text/csv":
+            return self._parse_csv(file_content)
+        if name.endswith(".txt") or content_type.startswith("text/"):
+            return self._ok("text", self._decode(file_content), 1, "decode")
+        if name.endswith(IMAGE_EXTENSIONS) or content_type.startswith("image/"):
+            return ParseResult(True, "image", "", 1, True, "ocr_required", "Image needs OCR")
+        return ParseResult(False, "unknown", "", None, False, "none",
+                           f"Unsupported file type ({content_type or filename.rsplit('.', 1)[-1]})")
+
+    def _parse_pdf(self, content: bytes) -> ParseResult:
         try:
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
-            page_count = len(pdf_reader.pages)
-            
-            text_parts = []
-            for page in pdf_reader.pages:
-                text = page.extract_text() or ""
-                text_parts.append(text)
-            
-            extracted_text = "\n\n".join(text_parts)
-            
-            # Check if we got meaningful text or if OCR is needed
-            if len(extracted_text.strip()) < 100:
-                return ParseResult(
-                    is_parseable=True,
-                    file_type="pdf",
-                    extracted_text="",
-                    page_count=page_count,
-                    needs_ocr=True,
-                    method="ocr_required",
-                    reason="PDF appears to be scanned/image-based, OCR required"
-                )
-            
-            return ParseResult(
-                is_parseable=True,
-                file_type="pdf",
-                extracted_text=extracted_text,
-                page_count=page_count,
-                needs_ocr=False,
-                method="pypdf2",
-                reason="Text extracted successfully"
-            )
-            
+            reader = PdfReader(io.BytesIO(content))
+            pages = [page.extract_text() or "" for page in reader.pages]
         except Exception as e:
-            return ParseResult(
-                is_parseable=True,
-                file_type="pdf",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=True,
-                method="ocr_fallback",
-                reason=f"PDF parsing failed: {str(e)}, falling back to OCR"
-            )
-    
-    def _parse_excel(self, file_content: bytes, filename: str) -> ParseResult:
-        """Extract text from Excel files."""
-        if openpyxl is None:
-            return ParseResult(
-                is_parseable=False,
-                file_type="excel",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=False,
-                method="none",
-                reason="openpyxl not available for Excel parsing"
-            )
-        
+            return ParseResult(True, "pdf", "", None, True, "ocr_fallback",
+                               f"PDF text layer unreadable ({e}); using OCR")
+        page_count = len(pages)
+        chars = sum(len(p.strip()) for p in pages)
+        if page_count == 0 or chars / page_count < MIN_CHARS_PER_PAGE:
+            return ParseResult(True, "pdf", "", page_count, True, "ocr_required",
+                               "PDF looks scanned (little or no text layer); using OCR")
+        text = "\n\n".join(f"=== Page {i + 1} ===\n{p}" for i, p in enumerate(pages))
+        return self._ok("pdf", text, page_count, "pypdf")
+
+    def _parse_xlsx(self, content: bytes) -> ParseResult:
         try:
-            workbook = openpyxl.load_workbook(io.BytesIO(file_content), data_only=True)
-            
-            text_parts = []
-            for sheet_name in workbook.sheetnames:
-                sheet = workbook[sheet_name]
-                text_parts.append(f"=== Sheet: {sheet_name} ===")
-                
-                for row in sheet.iter_rows(values_only=True):
-                    row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
-                    if row_text.strip():
-                        text_parts.append(row_text)
-            
-            extracted_text = "\n".join(text_parts)
-            
-            return ParseResult(
-                is_parseable=True,
-                file_type="excel",
-                extracted_text=extracted_text,
-                page_count=len(workbook.sheetnames),
-                needs_ocr=False,
-                method="openpyxl",
-                reason="Excel data extracted successfully"
-            )
-            
+            wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+            parts = []
+            for ws in wb.worksheets:
+                parts.append(f"=== Sheet: {ws.title} ===")
+                for row in ws.iter_rows(values_only=True):
+                    line = "\t".join("" if c is None else str(c) for c in row)
+                    if line.strip():
+                        parts.append(line)
+            return self._ok("excel", "\n".join(parts), len(wb.worksheets), "openpyxl")
         except Exception as e:
-            return ParseResult(
-                is_parseable=False,
-                file_type="excel",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=False,
-                method="none",
-                reason=f"Excel parsing failed: {str(e)}"
-            )
-    
-    def _parse_csv(self, file_content: bytes, filename: str) -> ParseResult:
-        """Extract text from CSV files."""
+            return ParseResult(False, "excel", "", None, False, "none", f"Spreadsheet could not be read: {e}")
+
+    def _parse_xls(self, content: bytes) -> ParseResult:
+        if xlrd is None:
+            return ParseResult(False, "excel", "", None, False, "none",
+                               "Legacy .xls files need xlrd; save as .xlsx and re-upload")
         try:
-            text = file_content.decode('utf-8', errors='replace')
-            return ParseResult(
-                is_parseable=True,
-                file_type="csv",
-                extracted_text=text,
-                page_count=1,
-                needs_ocr=False,
-                method="decode",
-                reason="CSV text extracted successfully"
-            )
+            book = xlrd.open_workbook(file_contents=content)
+            parts = []
+            for sheet in book.sheets():
+                parts.append(f"=== Sheet: {sheet.name} ===")
+                for r in range(sheet.nrows):
+                    line = "\t".join(str(v) for v in sheet.row_values(r))
+                    if line.strip():
+                        parts.append(line)
+            return self._ok("excel", "\n".join(parts), book.nsheets, "xlrd")
         except Exception as e:
-            return ParseResult(
-                is_parseable=False,
-                file_type="csv",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=False,
-                method="none",
-                reason=f"CSV parsing failed: {str(e)}"
-            )
-    
-    def _parse_text(self, file_content: bytes, filename: str) -> ParseResult:
-        """Extract text from plain text files."""
-        try:
-            text = file_content.decode('utf-8', errors='replace')
-            return ParseResult(
-                is_parseable=True,
-                file_type="text",
-                extracted_text=text,
-                page_count=1,
-                needs_ocr=False,
-                method="decode",
-                reason="Text extracted successfully"
-            )
-        except Exception as e:
-            return ParseResult(
-                is_parseable=False,
-                file_type="text",
-                extracted_text="",
-                page_count=None,
-                needs_ocr=False,
-                method="none",
-                reason=f"Text parsing failed: {str(e)}"
-            )
+            return ParseResult(False, "excel", "", None, False, "none", f"Spreadsheet could not be read: {e}")
+
+    def _parse_csv(self, content: bytes) -> ParseResult:
+        text = self._decode(content)
+        rows = csv.reader(io.StringIO(text))
+        return self._ok("csv", "\n".join("\t".join(r) for r in rows), 1, "csv")
+
+    @staticmethod
+    def _decode(content: bytes) -> str:
+        for encoding in ("utf-8-sig", "cp1252"):
+            try:
+                return content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return content.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _ok(file_type: str, text: str, pages: Optional[int], method: str) -> ParseResult:
+        if not text.strip():
+            return ParseResult(False, file_type, "", pages, False, method, "File contains no text")
+        return ParseResult(True, file_type, text, pages, False, method, "Text extracted")
