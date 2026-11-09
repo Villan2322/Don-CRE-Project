@@ -1366,14 +1366,15 @@ def build_report(*, deal_id: str, deal_name: str, classified_documents: list[dic
             "id": d["doc_id"], "filename": d["filename"],
             "type": _TYPE_ALIASES.get(d["doc_type"], d["doc_type"]),
             "classificationConfidence": d.get("classification_confidence"),
-            "uploadedAt": completed_at, "pageCount": d.get("page_count") or 1,
+            "uploadedAt": d.get("uploaded_at") or completed_at, "pageCount": d.get("page_count") or 1,
             "ocr": bool(d.get("ocr_performed")), "status": status, "note": note,
+            "carried": bool(d.get("carried")),
         })
     for err in ingest_errors:
         name, _, reason = err.partition(": ")
         documents.append({"id": f"err-{len(documents)}", "filename": name, "type": "OTHER",
                           "classificationConfidence": None, "uploadedAt": completed_at, "pageCount": 0,
-                          "ocr": False, "status": "FAILED", "note": reason})
+                          "ocr": False, "status": "FAILED", "note": reason, "carried": False})
 
     fin = m["financial"]
     return {
@@ -1407,6 +1408,49 @@ def build_report(*, deal_id: str, deal_name: str, classified_documents: list[dic
         "expirySchedule": expiry_schedule(m["tenants"], date.fromisoformat(m["as_of"])),
         "pipelineErrors": pipeline_errors,
         "isSample": False,
+        "carry": carry_forward(classified_documents, extractions, ingest_errors, completed_at),
+    }
+
+
+# What a later run needs to add documents without reading these files again.
+_CARRY_DOC_KEYS = ("doc_id", "deal_name", "filename", "content_type", "file_type", "page_count", "ocr_performed",
+                   "ocr_note", "parse_method", "doc_type", "classification_confidence", "classification_reasoning")
+
+
+def carry_forward(classified_documents: list[dict], extractions: list[dict], ingest_errors: list[str],
+                  completed_at: str) -> dict:
+    return {
+        "version": 1,
+        "documents": [{**{k: d.get(k) for k in _CARRY_DOC_KEYS}, "uploaded_at": d.get("uploaded_at") or completed_at}
+                      for d in classified_documents],
+        "extractions": extractions,
+        "ingest_errors": ingest_errors,
+    }
+
+
+def merge_prior(prior: dict, new_filenames: set[str]) -> dict:
+    """Validate a carry payload sent back by the browser. A new file with the same name replaces the old one."""
+    if not isinstance(prior, dict) or prior.get("version") != 1:
+        raise ValueError("Saved documents are from an older version — upload the full package once.")
+    docs = prior.get("documents")
+    exts = prior.get("extractions")
+    errs = prior.get("ingest_errors") or []
+    if not isinstance(docs, list) or not isinstance(exts, list) or not isinstance(errs, list):
+        raise ValueError("Saved documents are malformed.")
+    for d in docs:
+        if not isinstance(d, dict) or not isinstance(d.get("doc_id"), str) or not isinstance(d.get("filename"), str) \
+                or not isinstance(d.get("doc_type"), str):
+            raise ValueError("Saved documents are malformed.")
+    for e in exts:
+        if not isinstance(e, dict) or not isinstance(e.get("doc_id"), str) or \
+                not isinstance(e.get("extraction") or {}, dict):
+            raise ValueError("Saved extractions are malformed.")
+    docs = [d for d in docs if d["filename"] not in new_filenames]
+    keep = {d["doc_id"] for d in docs}
+    return {
+        "documents": docs,
+        "extractions": [e for e in exts if e["doc_id"] in keep],
+        "ingest_errors": [x for x in errs if isinstance(x, str) and x.partition(": ")[0] not in new_filenames],
     }
 
 

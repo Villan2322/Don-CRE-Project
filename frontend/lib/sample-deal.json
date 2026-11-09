@@ -772,7 +772,8 @@
       "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
-      "note": null
+      "note": null,
+      "carried": false
     },
     {
       "id": "doc-2",
@@ -783,7 +784,8 @@
       "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
-      "note": null
+      "note": null,
+      "carried": false
     },
     {
       "id": "doc-3",
@@ -794,7 +796,8 @@
       "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
-      "note": null
+      "note": null,
+      "carried": false
     },
     {
       "id": "doc-4",
@@ -805,18 +808,20 @@
       "pageCount": 1,
       "ocr": false,
       "status": "PROCESSED",
-      "note": null
+      "note": null,
+      "carried": false
     },
     {
       "id": "doc-5",
       "filename": "site_photo_notes.txt",
       "type": "OTHER",
       "classificationConfidence": 0.95,
-      "uploadedAt": "2026-11-09T17:24:34.951522+00:00",
+      "uploadedAt": "2026-11-05T15:00:00Z",
       "pageCount": 1,
       "ocr": false,
       "status": "SKIPPED",
-      "note": "Not a supported document type"
+      "note": "Not a supported document type",
+      "carried": false
     }
   ],
   "arithmeticChecks": [

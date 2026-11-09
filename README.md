@@ -35,6 +35,7 @@ The RSF Recovery Alert fires when BOMA and the billed area differ by more than 5
 - `frontend/` — Next.js dashboard, built to static files (`npm run build` → `frontend/out`).
 - An analysis runs as a background job: `POST /api/analyze` returns a job id, the browser polls `GET /api/jobs/{id}` and shows progress. Every request stays short, so no proxy timeout can cut off a long run.
 - Finished analyses are saved in the browser (localStorage). The server keeps jobs in memory for 6 hours, so run **one** instance.
+- **Adding documents to a deal.** Each result carries what was already read (`carry`: document types and extractions, no raw text). "Add documents" sends that back with only the new files as `prior`; the server reads just the new files, then recomputes metrics, the lease audit, flags, AI review, and score across everything. A new file with the same name replaces the old one; removing a document re-runs without reading anything. Because the carry lives with the saved analysis, this works in the browser where the deal was first analyzed.
 
 ## Deploy (any server with Docker)
 

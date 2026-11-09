@@ -12,6 +12,7 @@ Run it with `await graph.ainvoke(state)`; the nodes are async.
 """
 
 import asyncio
+import uuid
 import logging
 import os
 from datetime import date, datetime, timezone
@@ -58,7 +59,7 @@ async def ingest_documents(state: CREPipelineState) -> dict:
             text = ocr["cleaned_text"]
             ocr_note = "; ".join(ocr["ocr_issues_found"]) or None
         return {
-            "doc_id": f"doc-{index + 1}", "deal_name": state["deal_name"], "filename": filename,
+            "doc_id": f"doc-{uuid.uuid4().hex[:10]}", "deal_name": state["deal_name"], "filename": filename,
             "content_type": content_type, "file_type": parsed.file_type,
             "extracted_text": text[:MAX_TEXT_CHARS], "page_count": parsed.page_count,
             "ocr_performed": parsed.needs_ocr, "ocr_note": ocr_note, "parse_method": parsed.method,
@@ -108,7 +109,7 @@ def fan_out_extractions(state: CREPipelineState):
         Send("extract_document", SingleDocumentState(
             doc_id=d["doc_id"], deal_name=d["deal_name"], filename=d["filename"],
             doc_type=d["doc_type"], extracted_text=d["extracted_text"]))
-        for d in state["classified_documents"] if d["doc_type"] != "OTHER"
+        for d in state["classified_documents"] if d["doc_type"] != "OTHER" and not d.get("carried")
     ]
     return sends or ["compute_metrics"]
 
@@ -156,7 +157,9 @@ def build_report(state: CREPipelineState) -> dict:
         deal_id=state["deal_id"], deal_name=state["deal_name"],
         classified_documents=state["classified_documents"], extractions=state["extractions"],
         ingest_errors=state["ingest_errors"], metrics=state["metrics"], synthesis=state.get("synthesis"),
-        pipeline_errors=state["pipeline_errors"], files_uploaded=len(state["raw_files"]),
+        pipeline_errors=state["pipeline_errors"],
+        files_uploaded=len(state["raw_files"]) + sum(1 for d in state["classified_documents"] if d.get("carried"))
+        + sum(1 for e in state["ingest_errors"] if e.partition(": ")[0] not in state["raw_files"]),
         completed_at=completed_at)
     return {"report": report, "completed_at": completed_at, "pipeline_stage": "completed"}
 

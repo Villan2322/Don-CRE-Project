@@ -268,3 +268,76 @@ def test_health_verify_reports_a_bad_key(client, monkeypatch):
     monkeypatch.setattr(main, "make_client", lambda: Boom)
     body = client.get("/api/health?verify=true").json()
     assert body["anthropic_key_works"] is False and "x-api-key" in body["anthropic_error"]
+
+
+# ── adding documents to an earlier run ───────────────────────────────────────
+
+def _files(*names):
+    return [("files", (n, FILE_TEXT[n].encode(), "text/plain")) for n in names]
+
+
+def _carry_file(analysis, drop=()):
+    carry = dict(analysis["carry"])
+    keep = [d for d in carry["documents"] if d["filename"] not in drop]
+    ids = {d["doc_id"] for d in keep}
+    carry.update(documents=keep, extractions=[e for e in carry["extractions"] if e["doc_id"] in ids])
+    return ("prior", ("prior.json", json.dumps(carry).encode(), "application/json"))
+
+
+def _run_api(client, files, data=None):
+    resp = client.post("/api/analyze", data={"deal_name": "Sterling Test", "as_of": AS_OF, **(data or {})}, files=files)
+    assert resp.status_code == 202, resp.text
+    job, _ = wait_for(client, resp.json()["job_id"])
+    assert job["status"] == "done", job
+    return job["result"]["analysis"]
+
+
+def test_adding_a_document_reads_only_the_new_file(fake_claude, client):
+    first = _run_api(client, _files("stirling_aug_2025.txt", "boa_lease.txt", "escambia_pa.txt"))
+    assert not first["leaseAudit"]["available"]  # no BOMA yet
+    fake_claude.calls.clear()
+
+    second = _run_api(client, _files("boma_measurements.csv") + [_carry_file(first)])
+    extract_calls = [c for c in fake_claude.calls if c == "UniversalExtractor"]
+    assert len(extract_calls) == 2  # classify + extract the BOMA file only
+    assert second["leaseAudit"]["available"]
+    assert second["rsfReconciliation"]["alertTriggered"]
+    docs = {d["filename"]: d for d in second["documents"]}
+    assert set(docs) == {"stirling_aug_2025.txt", "boa_lease.txt", "escambia_pa.txt", "boma_measurements.csv"}
+    assert docs["boa_lease.txt"]["carried"] and not docs["boma_measurements.csv"]["carried"]
+    first_docs = {d["filename"]: d for d in first["documents"]}
+    assert docs["boa_lease.txt"]["uploadedAt"] == first_docs["boa_lease.txt"]["uploadedAt"]
+    assert docs["boma_measurements.csv"]["uploadedAt"] != first_docs["boa_lease.txt"]["uploadedAt"]
+    assert len(second["carry"]["documents"]) == 4
+    assert second["scoreBreakdown"]["documentCoverage"]["reasons"][0]["text"].startswith("4 of 4")
+
+
+def test_removing_a_document_reruns_without_reading_anything(fake_claude, client):
+    full = _run_api(client, _files("stirling_aug_2025.txt", "boa_lease.txt", "boma_measurements.csv"))
+    fake_claude.calls.clear()
+    fewer = _run_api(client, [_carry_file(full, drop={"boma_measurements.csv"})])
+    assert fake_claude.calls == ["SynthesisAgent"]
+    assert not fewer["leaseAudit"]["available"]
+    assert {d["filename"] for d in fewer["documents"]} == {"stirling_aug_2025.txt", "boa_lease.txt"}
+
+
+def test_a_new_file_with_the_same_name_replaces_the_old_one(fake_claude, client):
+    first = _run_api(client, _files("stirling_aug_2025.txt", "boa_lease.txt"))
+    second = _run_api(client, _files("boa_lease.txt") + [_carry_file(first)])
+    names = [d["filename"] for d in second["documents"]]
+    assert names.count("boa_lease.txt") == 1
+    assert not next(d for d in second["documents"] if d["filename"] == "boa_lease.txt")["carried"]
+
+
+def test_bad_prior_is_rejected(client):
+    bad = ("prior", ("prior.json", b'{"version": 1, "documents": "nope", "extractions": []}', "application/json"))
+    resp = client.post("/api/analyze", data={"deal_name": "x"}, files=_files("boa_lease.txt") + [bad])
+    assert resp.status_code == 400 and "malformed" in resp.json()["detail"]
+    old = ("prior", ("prior.json", b'{"documents": []}', "application/json"))
+    resp = client.post("/api/analyze", data={"deal_name": "x"}, files=_files("boa_lease.txt") + [old])
+    assert resp.status_code == 400 and "older version" in resp.json()["detail"]
+
+
+def test_nothing_new_and_nothing_carried_is_rejected(client):
+    resp = client.post("/api/analyze", data={"deal_name": "x"})
+    assert resp.status_code in (400, 422)

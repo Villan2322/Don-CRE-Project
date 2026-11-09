@@ -191,6 +191,16 @@ export interface UploadedDocument {
   ocr: boolean
   status: 'PROCESSED' | 'FAILED' | 'SKIPPED'
   note: string | null
+  carried?: boolean
+}
+
+// What the server already read for this deal. Sent back when documents are added, so
+// those files aren't read again. Treated as opaque apart from the ids and filenames.
+export interface Carry {
+  version: number
+  documents: { doc_id: string; filename: string; [key: string]: unknown }[]
+  extractions: { doc_id: string; [key: string]: unknown }[]
+  ingest_errors: string[]
 }
 
 export interface ArithmeticCheck {
@@ -237,10 +247,13 @@ export interface DealAnalysis {
   tenants: Tenant[]
   leaseAbstracts: LeaseAbstract[]
   documents: UploadedDocument[]
+  carry?: Carry
   arithmeticChecks: ArithmeticCheck[]
   expirySchedule: ExpiryBucket[]
   pipelineErrors: string[]
   isSample: boolean
 }
+
+export type UploadMode = 'add' | 'new'
 
 export type TabId = 'snapshot' | 'lease-audit' | 'audit' | 'rent-roll' | 'expirations' | 'risk' | 'abstracts' | 'upload'

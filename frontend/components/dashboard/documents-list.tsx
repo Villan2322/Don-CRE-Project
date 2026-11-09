@@ -2,7 +2,8 @@
 
 import { cn } from '@/lib/utils'
 import { DocumentType, UploadedDocument } from '@/lib/types'
-import { FileText, CheckCircle2, MinusCircle, XCircle } from 'lucide-react'
+import { FileText, CheckCircle2, MinusCircle, XCircle, Plus } from 'lucide-react'
+import { timestamp } from '@/lib/format'
 
 const TYPE_LABELS: Record<DocumentType, string> = {
   LEASE: 'Lease',
@@ -22,15 +23,27 @@ const STATUS = {
   FAILED: { icon: XCircle, color: 'text-destructive', label: 'Failed' },
 }
 
-export function DocumentsList({ documents }: { documents: UploadedDocument[] }) {
+export function DocumentsList({ documents, onAdd }: { documents: UploadedDocument[]; onAdd?: () => void }) {
   const processed = documents.filter((d) => d.status === 'PROCESSED').length
+  const uploads = new Set(documents.map((d) => d.uploadedAt)).size
   return (
     <div className="rounded-lg border border-border bg-card">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="font-semibold">Documents</h3>
-        <p className="text-xs text-muted-foreground">
-          {processed} of {documents.length} extracted
-        </p>
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <h3 className="font-semibold">Documents</h3>
+          <p className="text-xs text-muted-foreground">
+            {processed} of {documents.length} extracted{uploads > 1 ? ` · from ${uploads} uploads` : ''}
+          </p>
+        </div>
+        {onAdd && (
+          <button
+            onClick={onAdd}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add documents
+          </button>
+        )}
       </div>
       <ul className="divide-y divide-border">
         {documents.map((doc) => {
@@ -49,6 +62,7 @@ export function DocumentsList({ documents }: { documents: UploadedDocument[] }) 
                   <span className="rounded bg-accent px-1.5 py-0.5">{TYPE_LABELS[doc.type] ?? doc.type}</span>
                   {doc.pageCount > 0 && <span>{doc.pageCount} page{doc.pageCount !== 1 && 's'}</span>}
                   {doc.ocr && <span>OCR</span>}
+                  {uploads > 1 && <span>Added {timestamp(doc.uploadedAt)}</span>}
                 </div>
                 {doc.note && <p className={cn('mt-1 text-xs', doc.status === 'FAILED' ? 'text-destructive' : 'text-muted-foreground')}>{doc.note}</p>}
               </div>

@@ -4,7 +4,8 @@ import { AlertCircle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { scoreHistory } from '@/lib/deal-history'
 import { money, monthYear, sf, term } from '@/lib/format'
-import { ArithmeticCheck, DealAnalysis, TabId } from '@/lib/types'
+import { ArithmeticCheck, DealAnalysis, TabId, UploadMode } from '@/lib/types'
+import { canAddDocuments } from '@/lib/carry'
 import { ScoreCard } from './score-card'
 import { RSFAlert } from './rsf-alert'
 import { MetricsGrid } from './metrics-grid'
@@ -24,13 +25,19 @@ interface TabContentProps {
   history: DealAnalysis[]
   onAnalysisComplete: (analysis: DealAnalysis) => void
   onTabChange: (tab: TabId) => void
+  uploadMode: UploadMode
+  onUploadModeChange: (mode: UploadMode) => void
+  onAddDocuments: () => void
 }
 
-export function TabContent({ activeTab, deal, history, onAnalysisComplete, onTabChange }: TabContentProps) {
+export function TabContent({
+  activeTab, deal, history, onAnalysisComplete, onTabChange, uploadMode, onUploadModeChange, onAddDocuments,
+}: TabContentProps) {
+  const onAdd = canAddDocuments(deal) ? onAddDocuments : undefined
   const body = (() => {
     switch (activeTab) {
       case 'audit':
-        return <AuditTab deal={deal} />
+        return <AuditTab deal={deal} onAdd={onAdd} />
       case 'rent-roll':
         return <RentRollTab deal={deal} />
       case 'lease-audit':
@@ -42,9 +49,17 @@ export function TabContent({ activeTab, deal, history, onAnalysisComplete, onTab
       case 'abstracts':
         return <AbstractsTab deal={deal} />
       case 'upload':
-        return <DocumentUpload onAnalysisComplete={onAnalysisComplete} />
+        return (
+          <DocumentUpload
+            key={`${deal.id}:${uploadMode}`}
+            onAnalysisComplete={onAnalysisComplete}
+            baseDeal={deal}
+            mode={uploadMode}
+            onModeChange={onUploadModeChange}
+          />
+        )
       default:
-        return <SnapshotTab deal={deal} history={history} />
+        return <SnapshotTab deal={deal} history={history} onAdd={onAdd} />
     }
   })()
 
@@ -96,7 +111,7 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle: string })
   )
 }
 
-function SnapshotTab({ deal, history }: { deal: DealAnalysis; history: DealAnalysis[] }) {
+function SnapshotTab({ deal, history, onAdd }: { deal: DealAnalysis; history: DealAnalysis[]; onAdd?: () => void }) {
   return (
     <div className="space-y-6">
       <ScoreCard deal={deal} />
@@ -109,19 +124,19 @@ function SnapshotTab({ deal, history }: { deal: DealAnalysis; history: DealAnaly
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <RedFlagsList flags={deal.redFlags} limit={4} />
-        <WhatToGetNext items={deal.whatToGetNext} />
+        <WhatToGetNext items={deal.whatToGetNext} onAdd={onAdd} />
       </div>
     </div>
   )
 }
 
-function AuditTab({ deal }: { deal: DealAnalysis }) {
+function AuditTab({ deal, onAdd }: { deal: DealAnalysis; onAdd?: () => void }) {
   return (
     <div className="space-y-6">
       <SectionHeader title="Audit Log" subtitle="Every flag, every arithmetic check, and every document read" />
       <RedFlagsList flags={deal.redFlags} />
       <div className="grid gap-6 lg:grid-cols-2">
-        <DocumentsList documents={deal.documents} />
+        <DocumentsList documents={deal.documents} onAdd={onAdd} />
         <ArithmeticChecks checks={deal.arithmeticChecks} />
       </div>
     </div>

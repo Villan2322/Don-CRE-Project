@@ -1,11 +1,24 @@
 'use client'
 
-export function WhatToGetNext({ items }: { items: string[] }) {
+import { Plus } from 'lucide-react'
+
+export function WhatToGetNext({ items, onAdd }: { items: string[]; onAdd?: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-card">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="font-semibold">What to Get Next</h3>
-        <p className="text-xs text-muted-foreground">Requests that would close the biggest gaps</p>
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <h3 className="font-semibold">What to Get Next</h3>
+          <p className="text-xs text-muted-foreground">Requests that would close the biggest gaps</p>
+        </div>
+        {onAdd && (
+          <button
+            onClick={onAdd}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add documents
+          </button>
+        )}
       </div>
       {items.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">The package covers the core documents.</p>

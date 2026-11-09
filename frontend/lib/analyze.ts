@@ -1,4 +1,4 @@
-import { DealAnalysis } from './types'
+import { Carry, DealAnalysis } from './types'
 
 // The Python server serves this app and the API from the same origin.
 const API = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/$/, '')
@@ -28,11 +28,13 @@ export interface AnalyzeResult {
 export async function analyzeDeal(
   dealName: string,
   files: File[],
-  onStage?: (stage: string) => void
+  onStage?: (stage: string) => void,
+  prior?: Carry
 ): Promise<AnalyzeResult> {
   const form = new FormData()
   form.append('deal_name', dealName)
   for (const file of files) form.append('files', file, file.name)
+  if (prior) form.append('prior', new Blob([JSON.stringify(prior)], { type: 'application/json' }), 'prior.json')
 
   const started = await request(`${API}/analyze`, { method: 'POST', body: form })
   const jobId: string = started.job_id

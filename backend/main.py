@@ -13,6 +13,7 @@ Jobs live in memory. Run a single instance; a restart drops in-flight jobs
 import asyncio
 import base64
 import binascii
+import json
 import logging
 import secrets
 import os
@@ -29,12 +30,14 @@ from fastapi.staticfiles import StaticFiles
 
 from agents.base import DEFAULT_MODEL, fatal_api_message, make_client
 from graph import graph
+from services.deal_metrics import merge_prior
 from state import initial_state
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cre.api")
 
 MAX_FILES = int(os.environ.get("MAX_FILES", 25))
+MAX_DOCS_PER_DEAL = int(os.environ.get("MAX_DOCS_PER_DEAL", 60))
 MAX_UPLOAD_MB = float(os.environ.get("MAX_UPLOAD_MB", 100))
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_ANALYSES", 3))
 JOB_TTL_SECONDS = 6 * 3600
@@ -153,10 +156,16 @@ async def health(verify: bool = False) -> dict:
 @api.post("/analyze", status_code=202)
 async def analyze_deal(
     deal_name: str = Form(...),
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(default=[]),
     as_of: Optional[str] = Form(None),
+    prior: Optional[UploadFile] = File(None),
 ) -> dict:
-    """Start an analysis. Poll GET /api/jobs/{job_id} for the result."""
+    """Start an analysis. Poll GET /api/jobs/{job_id} for the result.
+
+    prior: the `carry` object from an earlier result of this deal, as a JSON file. Its documents
+    are kept as already read; only `files` are new. Send it with no files to re-run after
+    removing a document.
+    """
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise HTTPException(503, "ANTHROPIC_API_KEY is not set on the server.")
     if len(files) > MAX_FILES:
@@ -183,12 +192,21 @@ async def analyze_deal(
             raise HTTPException(413, f"Upload is over {MAX_UPLOAD_MB:g} MB.")
         raw_files[name] = data
         content_types[name] = f.content_type or "application/octet-stream"
-    if not raw_files:
+    carried = None
+    if prior is not None:
+        try:
+            carried = merge_prior(json.loads(await prior.read()), set(raw_files))
+        except (ValueError, json.JSONDecodeError) as e:
+            raise HTTPException(400, str(e) if isinstance(e, ValueError) and not isinstance(e, json.JSONDecodeError)
+                                else "Saved documents could not be read.")
+    if not raw_files and not (carried and carried["documents"]):
         raise HTTPException(400, "No files provided")
+    if len(raw_files) + len(carried["documents"] if carried else []) > MAX_DOCS_PER_DEAL:
+        raise HTTPException(400, f"A deal can hold at most {MAX_DOCS_PER_DEAL} documents.")
 
     _prune_jobs()
     job_id = str(uuid.uuid4())
-    state = initial_state(job_id, deal_name.strip() or "Untitled Deal", raw_files, content_types, as_of)
+    state = initial_state(job_id, deal_name.strip() or "Untitled Deal", raw_files, content_types, as_of, carried)
     _jobs[job_id] = {"status": "queued", "stage": "Queued", "created": time.time(), "result": None, "error": None}
     task = asyncio.create_task(_run(job_id, state))
     _tasks.add(task)

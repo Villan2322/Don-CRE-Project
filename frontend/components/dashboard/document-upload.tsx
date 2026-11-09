@@ -8,13 +8,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Spinner } from '@/components/ui/spinner'
-import { Upload, FileText, FileSpreadsheet, FileImage, AlertCircle, X, Play, Trash2 } from 'lucide-react'
+import { Upload, FileText, FileSpreadsheet, FileImage, AlertCircle, X, Play, Trash2, Undo2, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ACCEPTED_FILES, MAX_UPLOAD_BYTES, analyzeDeal } from '@/lib/analyze'
-import { DealAnalysis } from '@/lib/types'
+import { DealAnalysis, UploadMode } from '@/lib/types'
+import { canAddDocuments, carryWithout } from '@/lib/carry'
 
 interface DocumentUploadProps {
   onAnalysisComplete?: (analysis: DealAnalysis) => void
+  baseDeal?: DealAnalysis
+  mode?: UploadMode
+  onModeChange?: (mode: UploadMode) => void
 }
 
 const EXPECTED = [
@@ -44,7 +48,10 @@ function dealNameFrom(files: File[]) {
   return first || 'New deal'
 }
 
-export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
+export function DocumentUpload({ onAnalysisComplete, baseDeal, mode = 'new', onModeChange }: DocumentUploadProps) {
+  const addable = !!baseDeal && canAddDocuments(baseDeal)
+  const adding = mode === 'add' && addable && !!baseDeal
+  const [removed, setRemoved] = useState<Set<string>>(new Set())
   const [files, setFiles] = useState<File[]>([])
   const [dealName, setDealName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
@@ -89,8 +96,11 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
     const started = Date.now()
     timer.current = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
     try {
-      const { analysis } = await analyzeDeal(dealName.trim() || dealNameFrom(files), files, setStage)
+      const { analysis } = adding
+        ? await analyzeDeal(baseDeal.dealName, files, setStage, carryWithout(baseDeal, removed))
+        : await analyzeDeal(dealName.trim() || dealNameFrom(files), files, setStage)
       setFiles([])
+      setRemoved(new Set())
       setDealName('')
       setNameTouched(false)
       onAnalysisComplete?.(analysis)
@@ -111,12 +121,82 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-foreground">Analyze a deal</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Drop the whole document package. Every file is read, cross-checked, and scored together.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground">
+            {adding ? `Add documents to ${baseDeal.dealName}` : 'Analyze a deal'}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {adding
+              ? 'Only new files are read. Everything already in the deal is reused, then the whole deal is re-scored.'
+              : 'Drop the whole document package. Every file is read, cross-checked, and scored together.'}
+          </p>
+        </div>
+        {addable && baseDeal && (
+          <div className="inline-flex rounded-md border border-border p-0.5 text-sm">
+            {(['add', 'new'] as UploadMode[]).map((m) => (
+              <button
+                key={m}
+                disabled={running}
+                onClick={() => onModeChange?.(m)}
+                className={cn('rounded px-3 py-1.5', mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                {m === 'add' ? 'Add to this deal' : 'New deal'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {mode === 'add' && !addable && baseDeal && !baseDeal.isSample && (
+        <p className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          {baseDeal.dealName} was analyzed before documents could be added to a deal. Upload the full package once;
+          after that you can add documents to it.
+        </p>
+      )}
+
+      {adding && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Already in this deal</CardTitle>
+            <CardDescription>
+              {baseDeal.documents.length - removed.size} of {baseDeal.documents.length} kept · remove one to re-run without it
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {baseDeal.documents.map((doc) => {
+              const gone = removed.has(doc.id)
+              const replaced = files.some((f) => f.name === doc.filename)
+              return (
+                <div key={doc.id} className={cn('flex items-center gap-3 rounded-md border border-border p-3', (gone || replaced) && 'opacity-50')}>
+                  {icon(doc.filename)}
+                  <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', gone && 'line-through')}>{doc.filename}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {replaced ? 'Replaced by new upload' : doc.status === 'FAILED' ? 'Couldn’t be read' : doc.status === 'SKIPPED' ? 'Skipped' : doc.type.replace(/_/g, ' ').toLowerCase()}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={gone ? `Keep ${doc.filename}` : `Remove ${doc.filename}`}
+                    disabled={running}
+                    onClick={() =>
+                      setRemoved((prev) => {
+                        const next = new Set(prev)
+                        if (gone) next.delete(doc.id)
+                        else next.add(doc.id)
+                        return next
+                      })
+                    }
+                  >
+                    {gone ? <Undo2 className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                  </Button>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-dashed">
         <CardContent className="p-0">
@@ -154,7 +234,7 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <CardTitle className="text-base">Document package</CardTitle>
+                <CardTitle className="text-base">{adding ? 'New documents' : 'Document package'}</CardTitle>
                 <CardDescription>
                   {files.length} file{files.length !== 1 && 's'} · {mb(totalBytes)} of {mb(MAX_UPLOAD_BYTES)}
                 </CardDescription>
@@ -197,9 +277,10 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
         </Card>
       )}
 
-      {files.length > 0 && (
+      {(files.length > 0 || (adding && removed.size > 0)) && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="space-y-4 p-6">
+            {!adding && (
             <div className="grid gap-2 sm:max-w-md">
               <Label htmlFor="deal-name">Deal name</Label>
               <Input
@@ -216,17 +297,28 @@ export function DocumentUpload({ onAnalysisComplete }: DocumentUploadProps) {
                 Use the same name when you re-run a deal with more documents to track its score over time.
               </p>
             </div>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="text-sm text-muted-foreground">
                 {running
-                  ? `${stage ?? 'Uploading'}… ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} elapsed. Most packages take 1–3 minutes.`
-                  : 'Analysis usually takes 1–3 minutes.'}
+                  ? `${stage ?? 'Uploading'}… ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')} elapsed.${adding ? '' : ' Most packages take 1–3 minutes.'}`
+                  : adding
+                    ? [
+                        files.length ? `${files.length} new file${files.length !== 1 ? 's' : ''} to read` : null,
+                        removed.size ? `${removed.size} removed` : null,
+                      ].filter(Boolean).join(' · ') + '. Only new files are read, so this is quicker than a full run.'
+                    : 'Analysis usually takes 1–3 minutes.'}
               </div>
               <Button size="lg" onClick={run} disabled={running || overLimit} className="min-w-[160px]">
                 {running ? (
                   <>
                     <Spinner className="mr-2" />
                     Analyzing…
+                  </>
+                ) : adding ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Re-run deal
                   </>
                 ) : (
                   <>
